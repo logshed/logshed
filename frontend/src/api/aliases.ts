@@ -1,8 +1,13 @@
 import { apiFetch } from './client.ts';
-import { HostAlias } from '../types.ts';
+import { HostAlias, SelfReportedHosts } from '../types.ts';
 
 export async function fetchAliases(): Promise<HostAlias[]> {
   return apiFetch<HostAlias[]>('/api/aliases');
+}
+
+/** Addresses with no alias shown by a name they reported for themselves, the most recently seen first. */
+export async function fetchSelfReportedHosts(): Promise<SelfReportedHosts> {
+  return apiFetch<SelfReportedHosts>('/api/aliases/self-reported');
 }
 
 export async function saveAlias(aliasData: { ip: string; alias: string; notes?: string | null }): Promise<HostAlias> {

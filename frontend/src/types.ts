@@ -55,6 +55,20 @@ export interface HostAlias {
   last_seen?: string | null;
 }
 
+/** An address with no alias whose logs are shown by a host name it reported for itself. */
+export interface SelfReportedHost {
+  ip: string;
+  /** The names it reported, the most recently seen first */
+  names: string[];
+  last_seen?: string | null;
+}
+
+export interface SelfReportedHosts {
+  hosts: SelfReportedHost[];
+  truncated: boolean;
+  limit: number;
+}
+
 export interface AiProviderConfig {
   has_api_key: boolean;
   ai_api_key: string;

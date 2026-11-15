@@ -434,6 +434,8 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     created_at: nowIso(), updated_at: nowIso(), is_connected: false, active_containers: 0, last_error: 'The demo cannot connect to Docker hosts.', last_activity: null, latency_ms: null,
   })),
   ['POST', /^\/api\/docker\/hosts\/test$/, () => { throw notInDemo('Testing a Docker connection'); }],
+  // The demo's devices all have aliases, so none is shown by a name it reported itself
+  ['GET', /^\/api\/aliases\/self-reported$/, () => ({ hosts: [], truncated: false, limit: 200 })],
   ['GET', /^\/api\/aliases$/, () => store.aliases.map((a, i) => ({ ...a, last_seen: secondsAgo(3 + i * 11) }))],
   ['POST', /^\/api\/aliases$/, (_m, _q, b) => {
     const entry = { ip: String(b?.ip || ''), alias: String(b?.alias || ''), notes: (b?.notes as string) ?? null, created_at: nowIso() };

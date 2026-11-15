@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Server, Plus, Trash2, Edit2, AlertCircle, Loader2, ScrollText } from 'lucide-react';
-import { HostAlias } from '../../types.ts';
-import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
+import { HostAlias, SelfReportedHost } from '../../types.ts';
+import { fetchAliases, fetchSelfReportedHosts, saveAlias, deleteAlias } from '../../api/aliases.ts';
 import { useMediaQuery, useNow, usePolling, useServerTimezone } from '../../utils/hooks.ts';
 import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
@@ -9,6 +9,7 @@ import { useAlias } from '../../context/AliasContext.tsx';
 import { Button, IconButton } from '../common/Button.tsx';
 import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
 import { TextField } from '../common/Field.tsx';
+import { Badge } from '../common/Badge.tsx';
 import { TABLE_HEAD_ROW } from '../common/Table.tsx';
 import { LastSeen } from '../common/LastSeen.tsx';
 
@@ -61,6 +62,42 @@ function lastSeenByIp(list: HostAlias[]): Record<string, string | null | undefin
   return Object.fromEntries(list.map((a) => [a.ip, a.last_seen]));
 }
 
+/** A self-reported row's actions: save its name as the alias at once, or open Add Host Alias with it. */
+const SelfReportedRowActions: React.FC<{
+  host: SelfReportedHost;
+  isSaving: boolean;
+  onMakeAlias: (host: SelfReportedHost) => void;
+  onEdit: (host: SelfReportedHost) => void;
+}> = ({ host, isSaving, onMakeAlias, onEdit }) => (
+  <>
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={isSaving}
+      onClick={() => onMakeAlias(host)}
+      title={`Save ${host.names[0]} as the alias of ${host.ip}`}
+    >
+      {isSaving ? 'Saving...' : 'Make it the alias'}
+    </Button>
+    <IconButton size="sm" onClick={() => onEdit(host)} title="Add Host Alias" label={`Add an alias for ${host.ip}`}>
+      <Edit2 className="w-3.5 h-3.5" />
+    </IconButton>
+  </>
+);
+
+/** The badge on a name a device reported for itself; its other names, if any, on hover. */
+const SelfReportedBadge: React.FC<{ host: SelfReportedHost }> = ({ host }) => (
+  <Badge
+    title={
+      host.names.length > 1
+        ? `The name ${host.ip} sends itself (no alias set). It has also sent: ${host.names.slice(1).join(', ')}`
+        : `The name ${host.ip} sends itself (no alias set)`
+    }
+  >
+    Self-reported{host.names.length > 1 ? ` +${host.names.length - 1}` : ''}
+  </Badge>
+);
+
 export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   initialAddIp,
   onAliasSaved,
@@ -68,6 +105,9 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
 }) => {
   const { bumpAliasVersion } = useAlias();
   const [aliases, setAliases] = useState<HostAlias[]>([]);
+  const [selfReported, setSelfReported] = useState<SelfReportedHost[]>([]);
+  const [selfReportedCapped, setSelfReportedCapped] = useState<number | null>(null);
+  const [makingAliasIp, setMakingAliasIp] = useState<string | null>(null);
   // Kept apart from aliases, so a refresh cannot reset an open Add or Edit dialog
   const [lastSeen, setLastSeen] = useState<Record<string, string | null | undefined>>({});
   const now = useNow(5000);
@@ -91,6 +131,16 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   // A hand-off IP the user already dismissed must not reopen the modal when the alias list reloads.
   const dismissedAddIpRef = useRef<string | null>(null);
 
+  // The self-reported rows load on their own: the alias list does not wait for them, and a failure leaves them out
+  const loadSelfReported = () => {
+    fetchSelfReportedHosts()
+      .then((res) => {
+        setSelfReported(res.hosts);
+        setSelfReportedCapped(res.truncated ? res.limit : null);
+      })
+      .catch(() => {});
+  };
+
   const loadAliases = async () => {
     try {
       setIsLoading(true);
@@ -98,6 +148,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       const list = await fetchAliases();
       setAliases(list);
       setLastSeen(lastSeenByIp(list));
+      loadSelfReported();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to load host aliases.');
     } finally {
@@ -107,12 +158,14 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
 
   useEffect(() => {
     loadAliases();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loads once on mount; loadAliases is a new function each render
   }, []);
 
   usePolling(() => {
     fetchAliases()
       .then((list) => setLastSeen(lastSeenByIp(list)))
       .catch(() => {});
+    loadSelfReported();
   }, LAST_SEEN_REFRESH_MS);
 
   useEffect(() => {
@@ -152,6 +205,33 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
     setNotes(item.notes || '');
     setModalError(null);
     setIsModalOpen(true);
+  };
+
+  /** Add Host Alias with the address and the name it reported filled in. */
+  const openAddFromReported = (host: SelfReportedHost) => {
+    setEditingIp(null);
+    setIp(host.ip);
+    setAlias(host.names[0] ?? '');
+    setNotes('');
+    setModalError(null);
+    setIsModalOpen(true);
+  };
+
+  /** Saves the reported name as the address's alias at once, as the log drawer's Make it the alias does. */
+  const handleMakeAlias = async (host: SelfReportedHost) => {
+    if (makingAliasIp) return;
+    try {
+      setMakingAliasIp(host.ip);
+      setErrorMsg(null);
+      await saveAlias({ ip: host.ip, alias: host.names[0] });
+      await loadAliases();
+      bumpAliasVersion();
+      if (onAliasSaved) onAliasSaved();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'The alias could not be saved.');
+    } finally {
+      setMakingAliasIp(null);
+    }
   };
 
   /** Opens the Console filtered to this alias (same URL hand-off the Navbar uses). */
@@ -233,7 +313,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           className="p-3.5 sm:p-5 border-b border-line"
           icon={<Server />}
           title="Syslog Host Aliases"
-          description="Map incoming syslog source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall). Configured syslog senders push logs directly to LogShed and un-aliased hosts appear by IP in the console view."
+          description="Map incoming syslog source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall). A host without an alias appears in the Console by the name it sends itself, listed below as self-reported, or by its IP address."
           actions={
             <Button variant="primary" onClick={openAddModal} icon={<Plus className="w-3.5 h-3.5" />}>
               Add Host Alias
@@ -243,12 +323,15 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
 
         {/* Active Host Mappings Sub-Section */}
         <div className="p-3.5 sm:px-5 sm:py-3 bg-canvas/40 border-b border-line-subtle flex items-center justify-between">
-          <h4 className={SECTION_TITLE_CLASS}>Active Host Mappings ({aliases.length})</h4>
+          <h4 className={SECTION_TITLE_CLASS}>
+            Active Host Mappings ({aliases.length}
+            {selfReported.length > 0 ? `, ${selfReported.length} self-reported` : ''})
+          </h4>
         </div>
 
         {isLoading ? (
           <div className="p-6 text-center text-fg-muted font-mono text-xs">Loading mappings...</div>
-        ) : aliases.length === 0 ? (
+        ) : aliases.length === 0 && selfReported.length === 0 ? (
           <div className="p-6 text-center text-fg-muted font-mono text-xs">
             No host aliases mapped yet. Add a mapping to label incoming syslog IP addresses.
           </div>
@@ -281,6 +364,31 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     {item.notes}
                   </div>
                 )}
+              </div>
+            ))}
+            {selfReported.map((host) => (
+              <div key={`reported-${host.ip}`} className="p-3.5 space-y-2" data-testid="self-reported-row">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-accent-400 font-semibold text-xs sm:text-sm">{host.ip}</span>
+                  <div className="flex items-center gap-1.5">
+                    <SelfReportedRowActions
+                      host={host}
+                      isSaving={makingAliasIp === host.ip}
+                      onMakeAlias={handleMakeAlias}
+                      onEdit={openAddFromReported}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-fg-soft font-mono truncate">{host.names[0]}</span>
+                    <SelfReportedBadge host={host} />
+                  </span>
+                  <span className="text-fg-soft">
+                    <span className="text-fg-muted">Last seen </span>
+                    <LastSeen at={host.last_seen} now={now} timeZone={serverTimezone} />
+                  </span>
+                </div>
               </div>
             ))}
           </div>
@@ -319,6 +427,36 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 </div>
               </div>
             ))}
+            {selfReported.map((host) => (
+              <div
+                key={`reported-${host.ip}`}
+                data-testid="self-reported-row"
+                className="grid grid-cols-[160px_200px_1fr_110px_160px] px-4 py-2.5 items-center hover:bg-raised/50 transition"
+              >
+                <div className="font-mono text-accent-400 font-semibold">{host.ip}</div>
+                <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                  <span className="font-mono text-fg-soft truncate">{host.names[0]}</span>
+                  <SelfReportedBadge host={host} />
+                </div>
+                <div className="text-fg-muted truncate pr-2">No alias set</div>
+                <div className="text-fg-soft">
+                  <LastSeen at={host.last_seen} now={now} timeZone={serverTimezone} />
+                </div>
+                <div className="flex items-center justify-end gap-1.5">
+                  <SelfReportedRowActions
+                    host={host}
+                    isSaving={makingAliasIp === host.ip}
+                    onMakeAlias={handleMakeAlias}
+                    onEdit={openAddFromReported}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {selfReportedCapped !== null && (
+          <div className="px-4 py-2.5 border-t border-line-subtle text-xs text-fg-muted">
+            Showing the {selfReportedCapped} self-reported hosts seen most recently.
           </div>
         )}
       </Card>

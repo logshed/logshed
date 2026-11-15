@@ -542,6 +542,20 @@ class HostAliasResponse(BaseModel):
     )
 
 
+
+class SelfReportedHost(BaseModel):
+    """An address with no alias whose logs are shown by a host name it reported for itself."""
+    ip: str
+    names: list[str] = Field(description="The names it reported, the most recently seen first.")
+    last_seen: Optional[str] = Field(None, description="When the address last sent a log (ISO 8601, UTC).")
+
+
+class SelfReportedHostsResponse(BaseModel):
+    """The addresses shown by a self-reported name, the most recently seen first."""
+    hosts: list[SelfReportedHost]
+    truncated: bool = Field(description="True when more addresses than the limit reported a name.")
+    limit: int
+
 # ---------------------------------------------------------------------------
 # System, Health & Storage Models
 # ---------------------------------------------------------------------------

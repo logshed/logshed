@@ -298,3 +298,46 @@ async def test_continuation_lines_keep_the_reported_name(env):
     # A line with no header: it would read as host "-" and app "unknown" on its own
     await dispatch_syslog_message(b'  File "x.py", line 1, in <module>', PRINTER_IP, cache, Assembler())
     assert [(e["source_alias"], e.get("reported_host")) for e in fed] == [("printer-hp", "printer-hp")] * 2
+
+
+async def _self_reported(client: AsyncClient, headers: dict) -> dict:
+    resp = await client.get("/api/aliases/self-reported", headers=headers)
+    assert resp.status_code == 200
+    return resp.json()
+
+
+@pytest.mark.asyncio
+async def test_sources_lists_each_address_shown_by_its_own_name_until_it_gets_an_alias(client, headers, env):
+    from app.services.source_activity import get_source_activity, us_to_iso
+
+    store_logs(env, _row("job done", "printer-hp", env=env), _row("root login", "truenas", env=env))
+    # A second name from the same address, seen later
+    with open_db(env) as conn:
+        conn.execute("INSERT INTO reported_hosts VALUES ('hp-m404', ?, 9999999999999999)", (PRINTER_IP,))
+    get_source_activity().note([{"source_ip": PRINTER_IP, "source_kind": KIND_SYSLOG}], now_us=1_000)
+
+    listed = await _self_reported(client, headers)
+
+    # The name a configured host uses ("truenas") is not self-reported, so it is not listed
+    assert listed["truncated"] is False
+    assert [(h["ip"], h["names"]) for h in listed["hosts"]] == [(PRINTER_IP, ["hp-m404", "printer-hp"])]
+    assert listed["hosts"][0]["last_seen"] == us_to_iso(9999999999999999)
+
+    resp = await client.post("/api/aliases", json={"ip": PRINTER_IP, "alias": "printer-hp"}, headers=headers)
+    assert resp.status_code == 200
+    assert (await _self_reported(client, headers))["hosts"] == []
+
+
+@pytest.mark.asyncio
+async def test_sources_lists_at_most_the_limit_newest_first(client, headers, env, monkeypatch):
+    from app.api import aliases as aliases_api
+
+    monkeypatch.setattr(aliases_api, "SELF_REPORTED_LIMIT", 2)
+    with open_db(env) as conn:
+        conn.executemany(
+            "INSERT INTO reported_hosts VALUES (?, ?, ?)",
+            [(f"dev-{i}", f"10.0.0.{i}", 1_000 + i) for i in range(3)],
+        )
+    listed = await _self_reported(client, headers)
+    assert [h["ip"] for h in listed["hosts"]] == ["10.0.0.2", "10.0.0.1"]
+    assert (listed["truncated"], listed["limit"]) == (True, 2)
