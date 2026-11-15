@@ -13,6 +13,52 @@ const MAX_LOGS = 20000;
 
 const logs: LogEntry[] = makeHistory();
 const listeners = new Set<(log: LogEntry) => void>();
+
+/** A wildcard pattern (* and ?) as regular expression source, every other character literal. */
+function globSource(pattern: string): string {
+  return pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+}
+
+/** A host or app pattern list as rules read it: comma-separated, * and ? wildcards, any letter case; empty matches all. */
+function patternListMatches(list: unknown, ...values: (string | null | undefined)[]): boolean {
+  const patterns = String(list || '').split(',').map((p) => p.trim().toLowerCase()).filter(Boolean);
+  if (!patterns.length) return true;
+  return patterns.some((p) => {
+    const re = new RegExp(`^${globSource(p)}$`);
+    return values.some((v) => v && re.test(v.trim().toLowerCase()));
+  });
+}
+
+/** "Check last 24h" over the demo's logs (they are few, so every one is checked). */
+function previewRule(matches: (log: LogEntry) => boolean) {
+  const since = Date.now() - 24 * 3600_000;
+  const recent = logs.filter((l) => Date.parse(l.timestamp) >= since).sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  const hits = recent.filter(matches);
+  return {
+    matched: hits.length, checked: recent.length, complete: true, stopped_by: null, row_cap: 200000,
+    window_start: new Date(since).toISOString(), oldest_checked: recent.at(-1)?.timestamp ?? null,
+    pattern_timeouts: 0, examples: hits.slice(0, 5), error: null,
+  };
+}
+
+/** A message matcher for a rule pattern, or the reason the pattern cannot be read. */
+function messageMatcher(pattern: string, isRegex: boolean, wildcards: boolean): ((msg: string) => boolean) | string {
+  const p = pattern.trim();
+  if (!p || p === '*') return () => true;
+  if (isRegex) {
+    try {
+      const re = new RegExp(p, 'i');
+      return (msg) => re.test(msg);
+    } catch (e) {
+      return String((e as Error).message);
+    }
+  }
+  if (wildcards && /[*?]/.test(p)) {
+    const re = new RegExp(globSource(p.toLowerCase()));
+    return (msg) => re.test(msg.toLowerCase());
+  }
+  return (msg) => msg.toLowerCase().includes(p.toLowerCase());
+}
 const conversations = new Map<number, AiConversationMessage[]>();
 let nextAuditId = 1;
 let nextMessageId = 1;
@@ -287,6 +333,18 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
       return { matched: false, error: String((e as Error).message) };
     }
   }],
+  ['POST', /^\/api\/alerts\/preview$/, (_m, _q, b) => {
+    const pattern = String(b?.match_pattern || '');
+    const isRegex = b?.is_regex ?? /[*+?[\](){}^$|]|\\[dDwWsSbB.]/.test(pattern);
+    const message = messageMatcher(pattern, Boolean(isRegex), false);
+    if (typeof message === 'string') return { ...previewRule(() => false), checked: 0, error: message };
+    const severity = b?.filter_severity as number | null | undefined;
+    return previewRule((l) =>
+      patternListMatches(b?.filter_app, l.app_name) &&
+      patternListMatches(b?.filter_host, l.source_alias, l.source_ip) &&
+      (severity === null || severity === undefined || l.severity <= severity) &&
+      message(l.message));
+  }],
   ['GET', /^\/api\/alerts\/history$/, (_m, q) => {
     const ruleId = q.get('rule_id');
     const items = store.history.items.filter((h) => !ruleId || h.rule_id === Number(ruleId));
@@ -343,6 +401,16 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     } catch (e) {
       return { matched: false, error: String((e as Error).message) };
     }
+  }],
+  ['POST', /^\/api\/drop-rules\/preview$/, (_m, _q, b) => {
+    const message = messageMatcher(String(b?.message_pattern ?? '*'), Boolean(b?.is_regex), true);
+    if (typeof message === 'string') return { ...previewRule(() => false), checked: 0, error: message };
+    const threshold = b?.severity_threshold as number | null | undefined;
+    return previewRule((l) =>
+      patternListMatches(b?.source_pattern, l.source_alias, l.source_ip) &&
+      patternListMatches(b?.app_pattern, l.app_name) &&
+      (threshold === null || threshold === undefined || l.severity >= threshold) &&
+      message(l.message));
   }],
   ...crud('/api/saved-views', store.savedViews, (b) => ({ name: '', query_params: {}, is_pinned: false, ...b, created_at: nowIso() })),
   ...crud('/api/notifications/channels', store.channels, (b) => ({ name: '', url: '', is_enabled: true, ...b, created_at: nowIso(), updated_at: nowIso() })),

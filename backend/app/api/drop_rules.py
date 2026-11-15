@@ -30,14 +30,17 @@ from app.models import (
     DropRuleExportSingle,
     DropRuleImportResponse,
     DropRuleResponse,
+    DropRulePreviewRequest,
     DropRuleTestRequest,
     DropRuleTestResponse,
     DropRuleUpdate,
     MessageResponse,
     RuleReorderRequest,
+    RulePreviewResponse,
 )
 from app.services.drop_filter import CompiledDropRule, get_drop_filter
 from app.services.drop_presets import get_drop_presets, get_drop_preset_by_id
+from app.services.rule_preview import PREVIEW_BUSY_DETAIL, PreviewBusy, preview_response, run_preview
 from app.core.regex_validator import check_regex_safety, compile_user_pattern, validate_regex_pattern
 from app.core.utils import normalize_pattern_list, split_pattern_list
 
@@ -587,6 +590,59 @@ async def test_drop_rule(
         severity=payload.sample_severity,
     )
     return DropRuleTestResponse(matched=matched, error=None)
+
+
+@router.post("/preview", response_model=RulePreviewResponse)
+async def preview_drop_rule(
+    payload: DropRulePreviewRequest,
+    user: dict = Depends(get_current_user),
+) -> RulePreviewResponse:
+    """
+    How many stored logs of the last 24 hours the drop rule would have dropped, with the newest
+    few, checked with the drop rule matcher and stopping at a row and time cap. Logs that drop
+    rules already discarded were never stored, so they are not counted.
+    """
+    msg_pat = payload.message_pattern.strip() if payload.message_pattern else "*"
+    compiled_re = None
+    if payload.is_regex and msg_pat != "*":
+        is_safe, err = check_regex_safety(msg_pat)
+        if not is_safe:
+            return RulePreviewResponse(error=err)
+        compiled_re = compile_user_pattern(msg_pat, re.IGNORECASE)
+
+    rule = CompiledDropRule(
+        id=0,
+        source_pattern=normalize_pattern_list(payload.source_pattern),
+        app_pattern=normalize_pattern_list(payload.app_pattern),
+        message_pattern=msg_pat,
+        is_regex=payload.is_regex,
+        is_enabled=True,
+        severity_threshold=payload.severity_threshold,
+        compiled_regex=compiled_re,
+    )
+    timeouts = 0
+
+    def _count_timeout() -> None:
+        nonlocal timeouts
+        timeouts += 1
+
+    rule.on_pattern_timeout = _count_timeout
+
+    def _matches(entry: dict[str, Any]) -> bool:
+        return rule.matches(
+            entry.get("source_alias"),
+            entry.get("source_ip"),
+            entry.get("app_name"),
+            entry.get("message") or "",
+            severity=entry.get("severity"),
+        )
+
+    try:
+        result = await run_db_query(lambda conn: run_preview(conn, _matches))
+    except PreviewBusy:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=PREVIEW_BUSY_DETAIL) from None
+    result.pattern_timeouts = timeouts
+    return preview_response(result)
 
 
 # ---------------------------------------------------------------------------

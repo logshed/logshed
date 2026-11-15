@@ -19,7 +19,7 @@ import ipaddress
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from app.core.day_files import LEGACY_DAY, RAW_SQL, day_start_us, iso_sql, iso_to_us
 from app.core.utils import (
@@ -865,6 +865,23 @@ def search(
         total += part_total
         rows = _newest_first(rows + part_rows)[:needed]
     return min(total, count_limit), rows[offset:]
+
+
+def walk_newest(conn: sqlite3.Connection, log_filter: LogFilter, page_size: int) -> Iterator[list]:
+    """
+    The logs log_filter selects, newest first (timestamp, then id), in pages of at most page_size
+    rows (with raw), read one page at a time as the caller asks for the next. The walk ends after
+    the oldest row, or when the caller stops asking.
+    """
+    before: Optional[tuple[str, int]] = None
+    while True:
+        _, rows = search(conn, log_filter, fetch=page_size, count_limit=0, before=before)
+        if not rows:
+            return
+        yield rows
+        if len(rows) < page_size:
+            return
+        before = (str(rows[-1]["timestamp"]), rows[-1]["id"])
 
 
 def _search_part(

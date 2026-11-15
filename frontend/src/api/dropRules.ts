@@ -4,8 +4,10 @@ import {
   DropRule,
   DropRuleCreate,
   DropRuleUpdate,
+  DropRulePreviewRequest,
   DropRuleTestRequest,
   DropRuleTestResponse,
+  RulePreviewResponse,
 } from '../types.ts';
 
 export async function fetchDropRules(): Promise<DropRule[]> {
@@ -39,6 +41,14 @@ export async function testDropRule(
   data: DropRuleTestRequest
 ): Promise<DropRuleTestResponse> {
   return apiFetch<DropRuleTestResponse>('/api/drop-rules/test', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/** How many stored logs of the last 24 hours the drop rule would have dropped (409 while another check runs). */
+export async function previewDropRule(data: DropRulePreviewRequest): Promise<RulePreviewResponse> {
+  return apiFetch<RulePreviewResponse>('/api/drop-rules/preview', {
     method: 'POST',
     body: JSON.stringify(data),
   });

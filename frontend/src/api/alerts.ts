@@ -6,11 +6,13 @@ import {
   AlertRule,
   AlertRuleCreate,
   AlertRuleUpdate,
+  AlertPreviewRequest,
   AlertTestRequest,
   AlertTestResponse,
   MaintenanceLogHandling,
   MaintenanceSchedule,
   MaintenanceWindowResponse,
+  RulePreviewResponse,
 } from '../types.ts';
 
 export async function fetchAlertRules(): Promise<AlertRule[]> {
@@ -39,6 +41,14 @@ export async function deleteAlertRule(id: number): Promise<{ status: string }> {
 
 export async function testAlertRule(data: AlertTestRequest): Promise<AlertTestResponse> {
   return apiFetch<AlertTestResponse>('/api/alerts/test', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/** How many stored logs of the last 24 hours the rule would have matched (409 while another check runs). */
+export async function previewAlertRule(data: AlertPreviewRequest): Promise<RulePreviewResponse> {
+  return apiFetch<RulePreviewResponse>('/api/alerts/preview', {
     method: 'POST',
     body: JSON.stringify(data),
   });

@@ -162,6 +162,31 @@ def test_search_pages_by_offset_and_by_position_agree(db):
     assert total == 10
 
 
+@pytest.mark.parametrize("page_size", [1, 2, 3, 50])
+def test_walk_newest_reads_every_part_newest_first_in_pages(db, page_size):
+    _legacy_rows(db, _row(_ts(5, day=1), message="legacy"))
+    # Two rows share a time: the walk orders them by id and neither is lost at a page edge
+    store_logs(db, _row(_ts(1, day=2)), _row(_ts(2, day=2)), _row(_ts(2, day=2)), _row(_ts(3, day=3)))
+    with open_db(db, sqlite3.Row) as conn:
+        pages = list(log_store.walk_newest(conn, LogFilter(), page_size))
+        expected = log_store.search(conn, LogFilter(), fetch=10, count_limit=10)[1]
+    assert all(0 < len(page) <= page_size for page in pages)
+    walked = [r["id"] for page in pages for r in page]
+    assert walked == [r["id"] for r in expected] and len(walked) == 5
+    assert pages[-1][-1]["message"] == "legacy" and "raw" in pages[0][0].keys()
+
+
+def test_walk_newest_keeps_to_the_filter_and_stops_when_the_caller_does(db):
+    store_logs(db, *[_row(_ts(i, day=2), severity=3 if i % 2 else 6) for i in range(6)])
+    with open_db(db, sqlite3.Row) as conn:
+        severe = [r["severity"] for page in log_store.walk_newest(conn, LogFilter(severity_max=3), 2) for r in page]
+        walk = log_store.walk_newest(conn, LogFilter(), 2)
+        first = next(walk)
+        walk.close()
+    assert severe == [3, 3, 3]
+    assert [r["timestamp"] for r in first] == [_ts(5, day=2), _ts(4, day=2)]
+
+
 def test_search_count_is_capped(db):
     store_logs(db, *[_row(_ts(i)) for i in range(10)])
     with open_db(db, sqlite3.Row) as conn:

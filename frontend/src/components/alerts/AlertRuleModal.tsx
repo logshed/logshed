@@ -1,7 +1,8 @@
 import React, { useId, useState, useEffect, useMemo } from 'react';
 import { Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
 import { AlertRule, AlertRuleCreate, AlertRuleType, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
-import { createAlertRule, updateAlertRule } from '../../api/alerts.ts';
+import { createAlertRule, previewAlertRule, updateAlertRule } from '../../api/alerts.ts';
+import { RulePreviewPanel } from './RulePreviewPanel.tsx';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { Modal } from '../common/Modal.tsx';
@@ -584,6 +585,20 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             </p>
           )}
         </div>
+
+        <RulePreviewPanel
+          request={{
+            filter_app: formFilterApps.length > 0 ? formFilterApps.join(', ') : null,
+            filter_host: hostPattern || null,
+            filter_severity: formFilterSeverity === '' ? null : Number(formFilterSeverity),
+            match_pattern: formMatchPattern.trim() ? formMatchPattern.trim() : null,
+            is_regex: formIsRegex,
+          }}
+          run={previewAlertRule}
+          verb="matched"
+          note="Counts single logs: the threshold, cooldown and maintenance windows are not applied, so a threshold or rate rule fires less often than this."
+          disabled={hostListTooLong}
+        />
 
         {/* Cooldown */}
         <div className="space-y-1">

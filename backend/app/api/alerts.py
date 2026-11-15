@@ -34,6 +34,7 @@ from app.models import (
     AlertRuleImportResponse,
     AlertRuleResponse,
     AlertRuleUpdate,
+    AlertPreviewRequest,
     AlertTestRequest,
     AlertTestResponse,
     MaintenanceSchedulesUpdateRequest,
@@ -41,12 +42,14 @@ from app.models import (
     MaintenanceWindowRequest,
     MaintenanceWindowResponse,
     MessageResponse,
+    RulePreviewResponse,
     RuleReorderRequest,
 )
 from app.services import alert_history
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
 from app.services.maintenance_service import MaintenanceSessionLimitError
+from app.services.rule_preview import PREVIEW_BUSY_DETAIL, PreviewBusy, is_alert_exempt, preview_response, run_preview
 from app.core.regex_validator import alert_pattern_looks_like_regex, check_regex_safety, validate_regex_pattern
 from app.core.utils import normalize_pattern_list, parse_iso_to_epoch, parse_iso_to_utc_datetime
 
@@ -788,6 +791,56 @@ async def test_alert_pattern(
             extracted_ip=None,
             error="Pattern test failed unexpectedly. See server logs for details.",
         )
+
+
+@router.post("/preview", response_model=RulePreviewResponse)
+async def preview_alert_rule(
+    payload: AlertPreviewRequest,
+    user: dict = Depends(get_current_user),
+) -> RulePreviewResponse:
+    """
+    How many stored logs of the last 24 hours the rule would have matched, with the newest few,
+    checked with the rule's own matcher (not the Console search) and stopping at a row and time
+    cap. Maintenance windows, cooldowns and the threshold are not applied.
+    """
+    pattern = (payload.match_pattern or "").strip()
+    is_regex = alert_pattern_looks_like_regex(pattern) if payload.is_regex is None else payload.is_regex
+    if is_regex and pattern and pattern != "*":
+        is_safe, err = check_regex_safety(pattern)
+        if not is_safe:
+            return RulePreviewResponse(error=err)
+
+    rule = CompiledAlertRule(
+        id=0,
+        name="last 24 hours check",
+        rule_type="pattern",
+        channel_id=None,
+        filter_app=payload.filter_app,
+        filter_host=payload.filter_host,
+        filter_severity=payload.filter_severity,
+        match_pattern=payload.match_pattern,
+        is_regex=is_regex,
+        threshold_count=1,
+        window_seconds=60,
+        cooldown_seconds=0,
+        ai_enrichment=False,
+        is_enabled=True,
+    )
+    timeouts = 0
+
+    def _count_timeout() -> None:
+        nonlocal timeouts
+        timeouts += 1
+
+    rule.on_pattern_timeout = _count_timeout
+    try:
+        result = await run_db_query(
+            lambda conn: run_preview(conn, rule.matches, severity_max=payload.filter_severity, skip=is_alert_exempt)
+        )
+    except PreviewBusy:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=PREVIEW_BUSY_DETAIL) from None
+    result.pattern_timeouts = timeouts
+    return preview_response(result)
 
 
 # ---------------------------------------------------------------------------

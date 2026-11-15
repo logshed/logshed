@@ -198,6 +198,8 @@ LogShed includes a built-in canary alert preset based on `alert_log_storm.json`:
 
 Use the **Test Rule** button on any configured rule to open the dry-run tester. Enter sample log messages to verify that your regular expression or substring matches as expected and confirm that offending IP addresses are parsed correctly before activating rules in production.
 
+To see how often a rule would have matched real logs, click **Check last 24h** in the rule dialog while you write it. LogShed runs the rule's own matching (its filters and pattern, exactly as a saved rule matches) over the logs stored in the last 24 hours, newest first, and shows how many matched with the newest five. It counts single logs: a threshold rule fires only when enough of them fall inside its window, and cooldowns and maintenance windows are not applied, so the rule alerts less often than the count suggests. On a busy server the check stops after 200,000 logs or 5 seconds and says how far back it reached. One check runs at a time.
+
 ### Creating an Alert Rule from a Log
 
 In the Console, click a log entry to open the Log Detail drawer, then click **Create Alert Rule** (next to **Create Drop Rule**). LogShed opens **Rules & History > Alert Rules** with a new rule dialog that starts with:
@@ -277,6 +279,7 @@ LogShed makes rule creation effortless:
 2. **Dry-Run Test Simulation**:
    - Inside the drop rule creation modal, use the integrated test simulator before saving.
    - Enter a sample log message, test against candidate app names or severities, and receive instant feedback confirming whether the entry would be dropped or kept.
+   - Click **Check last 24h** to see how many logs stored in the last 24 hours the rule would have dropped, with the newest five (on a busy server, the newest 200,000 logs or what 5 seconds allow). Only stored logs can be counted: logs that a drop rule already discarded are not, so after you save a rule its own matches no longer appear.
 
 ### Practical Drop Rule Examples
 

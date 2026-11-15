@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ExternalLink, Play, RotateCcw } from 'lucide-react';
 import { DropRule } from '../../types.ts';
-import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } from '../../api/dropRules.ts';
+import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule, previewDropRule } from '../../api/dropRules.ts';
 import { fetchAliases } from '../../api/aliases.ts';
 import { Modal } from '../common/Modal.tsx';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
@@ -12,6 +12,7 @@ import { MESSAGE_PATTERN_MAX_LENGTH, NAME_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } f
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
 import { buttonClass } from '../common/Button.tsx';
 import { CHECKBOX_CLASS, controlClass, LABEL_CLASS, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
+import { RulePreviewPanel } from './RulePreviewPanel.tsx';
 
 const SEVERITY_RANGE_OPTIONS: SelectOption[] = [
   { value: '', label: 'Any severity' },
@@ -580,6 +581,20 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             </div>
           )}
         </div>
+
+        <RulePreviewPanel
+          request={{
+            message_pattern: messagePattern.trim() || '*',
+            is_regex: isRegex,
+            source_pattern: sourcePattern || undefined,
+            app_pattern: appPattern || undefined,
+            severity_threshold: severityThreshold,
+          }}
+          run={previewDropRule}
+          verb="dropped"
+          note="Only stored logs are counted: logs that drop rules already discarded (this one too, once saved) were never stored."
+          disabled={!hasFilterCriteria || sourceListTooLong || appListTooLong}
+        />
 
         <div className="flex items-center justify-between gap-2 pt-2 border-t border-line-subtle">
           {ruleToEdit ? (

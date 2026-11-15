@@ -442,6 +442,40 @@ export interface DropRuleTestResponse {
   error?: string | null;
 }
 
+/** How many stored logs of the last 24 hours a rule would have matched ("Check last 24h"). */
+export interface RulePreviewResponse {
+  matched: number;
+  checked: number;
+  /** Every stored log of the window was checked; else stopped_by says why the check stopped. */
+  complete: boolean;
+  stopped_by?: 'rows' | 'time' | null;
+  row_cap: number;
+  window_start: string;
+  /** Time of the oldest log checked (UTC ISO). */
+  oldest_checked?: string | null;
+  pattern_timeouts: number;
+  /** The newest matches, at most five. */
+  examples: LogEntry[];
+  /** Why the pattern cannot be checked; nothing was read. */
+  error?: string | null;
+}
+
+export interface AlertPreviewRequest {
+  filter_app?: string | null;
+  filter_host?: string | null;
+  filter_severity?: number | null;
+  match_pattern?: string | null;
+  is_regex?: boolean | null;
+}
+
+export interface DropRulePreviewRequest {
+  source_pattern?: string;
+  app_pattern?: string;
+  message_pattern: string;
+  is_regex: boolean;
+  severity_threshold: number | null;
+}
+
 export interface SavedView {
   id: number;
   name: string;

@@ -881,6 +881,31 @@ class DropRuleTestResponse(BaseModel):
     error: Optional[str] = None
 
 
+class DropRulePreviewRequest(BaseModel):
+    """A drop rule's criteria, to count the stored logs of the last 24 hours it would have dropped."""
+    source_pattern: Optional[str] = Field(None, max_length=255)
+    app_pattern: Optional[str] = Field(None, max_length=255)
+    message_pattern: Optional[str] = Field("*", max_length=1000)
+    is_regex: bool = Field(False)
+    severity_threshold: Optional[int] = Field(None, ge=0, le=7)
+
+
+class RulePreviewResponse(BaseModel):
+    """How many stored logs of the last 24 hours a rule would have matched, newest first."""
+    matched: int = Field(0, description="Logs the rule matched among those checked")
+    checked: int = Field(0, description="Logs checked")
+    complete: bool = Field(True, description="Every stored log of the window was checked")
+    stopped_by: Optional[Literal["rows", "time"]] = Field(
+        None, description="Why the check stopped before the window's oldest log: the row cap or the time cap"
+    )
+    row_cap: int = Field(0, description="Most logs one check reads")
+    window_start: str = Field("", description="Start of the window (UTC, ISO 8601)")
+    oldest_checked: Optional[str] = Field(None, description="Time of the oldest log checked (UTC, ISO 8601)")
+    pattern_timeouts: int = Field(0, description="Logs on which the pattern hit its per-match timeout (counted as no match)")
+    examples: list[LogEntry] = Field(default_factory=list, description="The newest matches, at most five")
+    error: Optional[str] = Field(None, description="Why the pattern cannot be checked; nothing was read")
+
+
 class DropPresetResponse(BaseModel):
     """Predefined log drop rule preset."""
     id: str
@@ -1115,6 +1140,15 @@ class AlertTestRequest(BaseModel):
     sample_app: Optional[str] = Field(None, description="Sample app name")
     sample_host: Optional[str] = Field(None, description="Sample host name or IP address")
     sample_severity: Optional[int] = Field(6, description="Sample severity (0-7)")
+
+
+class AlertPreviewRequest(BaseModel):
+    """An alert rule's filters and pattern, to count the stored logs of the last 24 hours it would have matched."""
+    filter_app: Optional[str] = Field(None, max_length=100)
+    filter_host: Optional[str] = Field(None, max_length=255)
+    filter_severity: Optional[int] = Field(None, ge=0, le=7)
+    match_pattern: Optional[str] = Field(None, max_length=1000)
+    is_regex: Optional[bool] = None
 
 
 class AlertTestResponse(BaseModel):
