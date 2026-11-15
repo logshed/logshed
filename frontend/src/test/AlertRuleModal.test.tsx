@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AlertRuleModal } from '../components/alerts/AlertRuleModal.tsx';
 import * as alertsApi from '../api/alerts.ts';
@@ -508,6 +508,23 @@ describe('AlertRuleModal prefill from a log', () => {
     rerender(<AlertRuleModal {...props} prefill={{ name: 'B', referenceMessage: 'second line' }} />);
     expect(screen.getByLabelText('From log')).toHaveValue('second line');
     expect(screen.getByRole('button', { name: 'Use selection as pattern' })).toBeDisabled();
+  });
+
+  it('follows a selection made by touch in the From log box (selectionchange only)', () => {
+    renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: 'disk sda failed' });
+    const ref = screen.getByLabelText('From log') as HTMLTextAreaElement;
+    // iOS starts a long-press selection with a mousedown and sends no mouseup, so React's
+    // onSelect waits for a mouseup that never comes
+    fireEvent.mouseDown(ref);
+    ref.focus();
+    ref.setSelectionRange(5, 8);
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Use selection as pattern' }));
+    expect(screen.getByLabelText('Match Pattern')).toHaveValue('sda');
+    // React keeps the mouse state for the whole module: release it for the tests after this one
+    fireEvent.mouseUp(ref);
   });
 
   it('refuses a selection longer than a pattern can be', () => {

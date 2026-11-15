@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { alertPatternFromSelection, dropPatternFromSelection, escapeRegex, selectionProblem } from '../utils/selectionPattern.ts';
 import { CreateDropRuleModal } from '../components/alerts/CreateDropRuleModal.tsx';
@@ -54,6 +54,23 @@ describe('Use selection as pattern in the drop rule dialog', () => {
   };
   const pattern = () => screen.getByPlaceholderText(/DHCPACK/) as HTMLInputElement;
   const regexBox = () => screen.getByLabelText('Interpret message pattern as Regular Expression') as HTMLInputElement;
+
+  it('follows a selection made by touch, which sends only the document\'s selectionchange', () => {
+    render(<CreateDropRuleModal isOpen={true} onClose={vi.fn()} initialApp="nginx" initialMessage={line} />);
+    const sample = screen.getByPlaceholderText('Paste a representative log line here...') as HTMLTextAreaElement;
+    // iOS starts a long-press selection with a mousedown and sends no mouseup, so React's
+    // onSelect waits for a mouseup that never comes
+    fireEvent.mouseDown(sample);
+    sample.focus();
+    sample.setSelectionRange(0, 3);
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Use selection as pattern' }));
+    expect(pattern().value).toBe('GET');
+    // React keeps the mouse state for the whole module: release it for the tests after this one
+    fireEvent.mouseUp(sample);
+  });
 
   it('is disabled until part of the sample line is selected', () => {
     const { use } = openFromLog();

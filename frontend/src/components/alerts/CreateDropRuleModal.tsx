@@ -511,6 +511,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               rows={2}
               value={sampleMessage}
               onChange={(e) => setSampleMessage(e.target.value)}
+              ref={selection.boxRef}
               onSelect={selection.onSelect}
               placeholder="Paste a representative log line here..."
               className={controlClass({ mono: true })}

@@ -2,7 +2,7 @@
  * "Use selection as pattern": turns text the user selected in a log line into a rule pattern that
  * matches exactly that text, in the rule's own pattern language.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MESSAGE_PATTERN_MAX_LENGTH } from './fieldLimits.ts';
 
 /** Text as a regular expression that matches that text and nothing else (Python's regex and JavaScript alike). */
@@ -46,7 +46,9 @@ export function selectionProblem(text: string, pattern: string): string | null {
 }
 
 /**
- * The selection in a log line's text box and the pattern it gives. onSelect keeps it up to date;
+ * The selection in a log line's text box and the pattern it gives. Give boxRef and onSelect to the
+ * box: onSelect follows mouse and keyboard selection, and boxRef the document's selectionchange,
+ * the only event iOS Safari sends while a selection is made by touch (React's onSelect misses it);
  * use() returns the pattern to put in and remembers it, so that ticking or unticking the regular
  * expression box while the pattern is still that one rewrites it for the new mode (toggled());
  * reset() forgets both, for a dialog that opens again.
@@ -59,6 +61,18 @@ export function useSelectionPattern(
   const [inserted, setInserted] = useState<{ text: string; pattern: string } | null>(null);
   const candidate = fromSelection(selected, isRegex);
   const problem = candidate.pattern ? selectionProblem(selected, candidate.pattern) : null;
+
+  const boxRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const box = boxRef.current;
+      if (box && document.activeElement === box) {
+        setSelected(box.value.slice(box.selectionStart ?? 0, box.selectionEnd ?? 0));
+      }
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, []);
 
   const onSelect = (e: React.SyntheticEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     const box = e.currentTarget;
@@ -80,5 +94,5 @@ export function useSelectionPattern(
     setSelected('');
     setInserted(null);
   }, []);
-  return { candidate, problem, canUse: Boolean(candidate.pattern) && !problem, onSelect, use, toggled, reset };
+  return { candidate, problem, canUse: Boolean(candidate.pattern) && !problem, boxRef, onSelect, use, toggled, reset };
 }

@@ -595,6 +595,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                 defaultValue={referenceMessage}
                 rows={2}
                 mono
+                ref={selection.boxRef}
                 onSelect={selection.onSelect}
                 hint="Select the part of the line to match, then use it as the pattern. Editing this copy changes nothing."
               />
