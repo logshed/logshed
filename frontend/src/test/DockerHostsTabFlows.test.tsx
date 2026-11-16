@@ -1,6 +1,8 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DockerHostsTab } from '../components/settings/DockerHostsTab.tsx';
+import { DockerHostFormModal } from '../components/settings/DockerHostFormModal.tsx';
+import { DeletedDockerHostNotice } from '../components/settings/DeletedDockerHostNotice.tsx';
 import * as dockerHostsApi from '../api/dockerHosts.ts';
 import type { DockerEndpoint } from '../types.ts';
 
@@ -167,8 +169,7 @@ describe('DockerHostsTab errors', () => {
     const api = stubApi([]);
     api.test.mockRejectedValue(new Error('Name or service not known'));
     api.create.mockRejectedValue(new Error('A Docker host with this name already exists.'));
-    const onHostSaved = vi.fn();
-    render(<DockerHostsTab onHostSaved={onHostSaved} />);
+    render(<DockerHostsTab />);
     await screen.findByText('No Docker hosts configured');
 
     fireEvent.click(screen.getByRole('button', { name: /Add Docker Host/i }));
@@ -182,7 +183,7 @@ describe('DockerHostsTab errors', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Host' }));
     expect(await screen.findByText('A Docker host with this name already exists.')).toBeInTheDocument();
-    expect(onHostSaved).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Add Docker Host' })).toBeInTheDocument();
   });
 
   it('refuses to save without a name and URL', async () => {
@@ -220,10 +221,10 @@ describe('DockerHostsTab saving a stored client key', () => {
   });
 });
 
-describe('DockerHostsTab opened from elsewhere', () => {
+describe('Docker host dialogs opened from elsewhere (the log drawer)', () => {
   it('opens the edit dialog for the requested host, with the primary host name fixed', async () => {
     stubApi();
-    render(<DockerHostsTab initialEditEndpointId={1} />);
+    render(<DockerHostFormModal editingHost={HOSTS[0]} onClose={vi.fn()} onSaved={vi.fn()} />);
     expect(await screen.findByRole('heading', { name: 'Edit Docker Host' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Host Name/i)).toBeDisabled();
     expect(screen.getByText('Primary Docker endpoint name is fixed.')).toBeInTheDocument();
@@ -241,46 +242,31 @@ describe('DockerHostsTab opened from elsewhere', () => {
   });
 
   it('explains a deleted host and offers a syslog alias or re-adding it', async () => {
-    stubApi([]);
     const onAddSyslogAlias = vi.fn();
-    const onClearSourcesState = vi.fn();
+    const onReAdd = vi.fn();
     render(
-      <DockerHostsTab
-        initialDeletedHostInfo={{ name: 'old-nas', ip: '192.168.1.40' }}
-        onAddSyslogAlias={onAddSyslogAlias}
-        onClearSourcesState={onClearSourcesState}
-      />
+      <DeletedDockerHostNotice host={{ name: 'old-nas', ip: '192.168.1.40' }} onClose={vi.fn()} onReAdd={onReAdd} onAddSyslogAlias={onAddSyslogAlias} />
     );
-
-    expect(await screen.findByText('Docker host endpoint not found')).toBeInTheDocument();
+    expect(screen.getByText('Docker host endpoint not found')).toBeInTheDocument();
     expect(screen.getByText('192.168.1.40')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add Syslog Host Alias' }));
     expect(onAddSyslogAlias).toHaveBeenCalledWith('192.168.1.40');
-    expect(onClearSourcesState).toHaveBeenCalled();
-    expect(screen.queryByText('Docker host endpoint not found')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Re-add Docker Host' }));
+    expect(onReAdd).toHaveBeenCalledWith({ name: 'old-nas', source_alias: 'old-nas', url: 'tcp://192.168.1.40:2375' });
   });
 
-  it('re-adds a deleted host with its address, or the local socket for a docker source', async () => {
-    stubApi([]);
-    const { unmount } = render(<DockerHostsTab initialDeletedHostInfo={{ name: 'old-nas', ip: '192.168.1.40' }} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Re-add Docker Host' }));
-    expect((screen.getByLabelText(/Host Name/i) as HTMLInputElement).value).toBe('old-nas');
-    expect(screen.getByDisplayValue('tcp://192.168.1.40:2375')).toBeInTheDocument();
-    unmount();
-
-    render(<DockerHostsTab initialDeletedHostInfo={{ name: 'docker', ip: 'docker' }} onAddSyslogAlias={vi.fn()} />);
-    expect(await screen.findByText('Docker host endpoint not found')).toBeInTheDocument();
+  it('re-adds a docker source as the local socket, with no syslog alias to offer', async () => {
+    const onReAdd = vi.fn();
+    render(<DeletedDockerHostNotice host={{ name: 'docker', ip: 'docker' }} onClose={vi.fn()} onReAdd={onReAdd} onAddSyslogAlias={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Add Syslog Host Alias' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Re-add Docker Host' }));
-    expect(screen.getByDisplayValue('unix:///var/run/docker.sock')).toBeInTheDocument();
+    expect(onReAdd).toHaveBeenCalledWith({ name: 'docker', source_alias: 'docker', url: 'unix:///var/run/docker.sock' });
   });
 
   it('Close dismisses the notice', async () => {
-    stubApi([]);
-    const onClearSourcesState = vi.fn();
-    render(<DockerHostsTab initialDeletedHostInfo={{ name: 'old-nas', ip: '192.168.1.40' }} onClearSourcesState={onClearSourcesState} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Close' }));
-    expect(screen.queryByText('Docker host endpoint not found')).toBeNull();
-    expect(onClearSourcesState).toHaveBeenCalledTimes(1);
+    const onClose = vi.fn();
+    render(<DeletedDockerHostNotice host={{ name: 'old-nas', ip: '192.168.1.40' }} onClose={onClose} onReAdd={vi.fn()} onAddSyslogAlias={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

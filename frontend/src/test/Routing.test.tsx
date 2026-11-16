@@ -15,22 +15,11 @@ vi.mock('../context/AuthContext.tsx', () => ({
 }));
 
 vi.mock('../components/logs/LiveLogStream.tsx', () => ({
-  LiveLogStream: ({ onAddAlias }: { onAddAlias?: (ip: string) => void }) => (
-    <div data-testid="live-log-stream">
-      Console View Content
-      <button type="button" onClick={() => onAddAlias?.("10.0.0.5")}>Mock Add Alias</button>
-    </div>
-  ),
+  LiveLogStream: () => <div data-testid="live-log-stream">Console View Content</div>,
 }));
 
 vi.mock('../components/aliases/HostAliasManager.tsx', () => ({
-  HostAliasManager: ({ initialAddIp, onCancel }: { initialAddIp?: string | null; onCancel?: () => void }) => (
-    <div data-testid="host-alias-manager">
-      Host Alias Content
-      {initialAddIp ? <span data-testid="alias-modal-open">{initialAddIp}</span> : null}
-      <button type="button" onClick={() => onCancel?.()}>Mock Cancel Alias</button>
-    </div>
-  ),
+  HostAliasManager: () => <div data-testid="host-alias-manager">Host Alias Content</div>,
 }));
 
 vi.mock('../components/storage/StoragePanel.tsx', () => {
@@ -274,53 +263,6 @@ describe('URL Routing and History API Synchronization', () => {
         expect(systemApi.fetchVersion).toHaveBeenCalled();
       });
       expect(document.title).toBe('LogShed - DEMO');
-    });
-  });
-
-  describe('Add Alias hand-off from the log stream', () => {
-    it('a cancelled hand-off does not reopen the Add Alias modal on the next visit', async () => {
-      render(<App />);
-
-      fireEvent.click(screen.getByRole('button', { name: 'Mock Add Alias' }));
-      await waitFor(() => {
-        expect(screen.getByTestId('alias-modal-open')).toHaveTextContent('10.0.0.5');
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: 'Mock Cancel Alias' }));
-      await waitFor(() => {
-        expect(screen.queryByTestId('alias-modal-open')).toBeNull();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /Console View/i }));
-      await waitFor(() => {
-        expect(screen.getByTestId('live-log-stream')).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByRole('button', { name: /^Settings$/i }));
-      fireEvent.click(await screen.findByRole('button', { name: /^Sources$/i }));
-      await waitFor(() => {
-        expect(screen.getByTestId('host-alias-manager')).toBeInTheDocument();
-      });
-      expect(screen.queryByTestId('alias-modal-open')).toBeNull();
-    });
-
-    it('leaving Settings with the hand-off still pending clears it', async () => {
-      render(<App />);
-
-      fireEvent.click(screen.getByRole('button', { name: 'Mock Add Alias' }));
-      await waitFor(() => {
-        expect(screen.getByTestId('alias-modal-open')).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /Console View/i }));
-      await waitFor(() => {
-        expect(screen.getByTestId('live-log-stream')).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByRole('button', { name: /^Settings$/i }));
-      fireEvent.click(await screen.findByRole('button', { name: /^Sources$/i }));
-      await waitFor(() => {
-        expect(screen.getByTestId('host-alias-manager')).toBeInTheDocument();
-      });
-      expect(screen.queryByTestId('alias-modal-open')).toBeNull();
     });
   });
 });

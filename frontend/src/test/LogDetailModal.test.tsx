@@ -257,14 +257,14 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(inspectContextBtn).toBeInTheDocument();
     expect(inspectContextBtn).toHaveAttribute('title', 'Add Context to AI Analysis');
 
-    // Clicking it should transfer all 4 logs (sorted chronologically) and close modal
+    // Clicking it transfers all 4 logs (sorted chronologically); the AI dialog opens over the drawer, which stays
     fireEvent.click(inspectContextBtn);
 
     expect(handleInspectWithContext).toHaveBeenCalledTimes(1);
     const transferredLogs = handleInspectWithContext.mock.calls[0][0];
     expect(transferredLogs).toHaveLength(4);
     expect(transferredLogs.map((l: LogEntry) => l.id)).toEqual([98, 99, 100, 101]);
-    expect(handleClose).toHaveBeenCalledTimes(1);
+    expect(handleClose).not.toHaveBeenCalled();
   });
 
   it('filters out any logs not matching the target host to enforce single-host constraint', async () => {

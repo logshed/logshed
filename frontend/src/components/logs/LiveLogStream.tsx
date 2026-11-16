@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { CheckSquare, Square, ArrowUp, Loader2, AlertCircle } from 'lucide-react';
-import { LogEntry, LogFacetsResponse, LogFilterParams } from '../../types.ts';
+import { DockerEndpoint, LogEntry, LogFacetsResponse, LogFilterParams, NotificationChannel } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
 import { useSavedViews, findActiveView } from './useSavedViews.ts';
 import { LogDetailModal } from './LogDetailModal.tsx';
@@ -34,7 +34,11 @@ import {
   DESKTOP_LOG_ROW_HEIGHT,
   MOBILE_LOG_ROW_HEIGHT,
 } from './LogRow.tsx';
-import { setAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
+import { alertRulePrefillFromLog } from '../../utils/alertRulePrefill.ts';
+import { fetchNotificationChannels } from '../../api/notifications.ts';
+import { HostAliasFormModal, HostAliasFormValues } from '../aliases/HostAliasFormModal.tsx';
+import { DeletedDockerHost, DeletedDockerHostNotice } from '../settings/DeletedDockerHostNotice.tsx';
+import type { AlertRulePrefill } from '../alerts/AlertRuleModal.tsx';
 import { SCROLLBACK_BUFFER_SIZE, useLogBuffer } from './useLogBuffer.ts';
 import { SELECT_ALL_LIMIT, useLogSelection } from './useLogSelection.ts';
 import { SourcesChange, useSourcesConfig } from './useSourcesConfig.ts';
@@ -55,14 +59,29 @@ import { useAlias } from '../../context/AliasContext.tsx';
 const CreateDropRuleModal = React.lazy(() =>
   import('../alerts/CreateDropRuleModal.tsx').then((m) => ({ default: m.CreateDropRuleModal }))
 );
+const AlertRuleModal = React.lazy(() =>
+  import('../alerts/AlertRuleModal.tsx').then((m) => ({ default: m.AlertRuleModal }))
+);
+const DockerHostFormModal = React.lazy(() =>
+  import('../settings/DockerHostFormModal.tsx').then((m) => ({ default: m.DockerHostFormModal }))
+);
+
+/**
+ * A dialog the log drawer opened on top of itself (the drop rule dialog has its own state). A new
+ * key starts a form afresh; the deleted Docker host notice hands over to the alias or Docker form.
+ */
+type DrawerDialog =
+  | { kind: 'alias'; key: number; initial: HostAliasFormValues; editing: boolean }
+  | { kind: 'docker'; key: number; host: DockerEndpoint | null; initialAddHost?: { name: string; source_alias: string; url: string } }
+  | { kind: 'deleted-docker'; key: number; host: DeletedDockerHost }
+  | { kind: 'alert'; key: number; prefill: AlertRulePrefill; channels: NotificationChannel[] };
+// One of the dialogs above, before openDrawerDialog gives it its key
+type DrawerDialogRequest = DrawerDialog extends infer D ? (D extends DrawerDialog ? Omit<D, 'key'> : never) : never;
 
 interface LiveLogStreamProps {
   onDiagnoseAi: (selectedLogs: LogEntry[]) => void;
   /** Opens Settings on the Sources tab (used by the first-run card). */
   onOpenSourcesSettings?: () => void;
-  onAddAlias?: (ip: string) => void;
-  onEditDockerHost?: (endpointId: number) => void;
-  onManageDeletedDockerHost?: (info: { name: string; ip: string }) => void;
   clearSelectionSignal?: number;
   pullTouchHandlers?: PullTouchHandlers;
 }
@@ -75,9 +94,6 @@ const EMPTY_SELECTED_LOGS: ProcessedLogEntry[] = [];
 export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   onDiagnoseAi,
   onOpenSourcesSettings,
-  onAddAlias,
-  onEditDockerHost,
-  onManageDeletedDockerHost,
   clearSelectionSignal,
   pullTouchHandlers,
 }) => {
@@ -90,6 +106,13 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const focusPagesLoadedRef = useRef<number>(0);
   const [activeLogDetail, setActiveLogDetail] = useState<LogEntry | null>(null);
   const [dropRuleTargetLog, setDropRuleTargetLog] = useState<LogEntry | null>(null);
+  // The other dialogs the drawer opens on top of itself
+  const [drawerDialog, setDrawerDialog] = useState<DrawerDialog | null>(null);
+  const drawerDialogKeyRef = useRef(0);
+  const openDrawerDialog = useCallback((dialog: DrawerDialogRequest) => {
+    drawerDialogKeyRef.current += 1;
+    setDrawerDialog({ ...dialog, key: drawerDialogKeyRef.current } as DrawerDialog);
+  }, []);
   const [showDeleteSelectedConfirm, setShowDeleteSelectedConfirm] = useState<boolean>(false);
   const [streamDisconnected, setStreamDisconnected] = useState<boolean>(false);
   const { skipped: skippedCount, noteSkipped, reset: resetSkipped } = useSkippedNote();
@@ -847,9 +870,16 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           // The AI dialog opens on top of the drawer, so closing it shows the same log again
           onExplainWithAi={(log, ctxLogs) => selectAndAnalyze(ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log])}
           onInspectWithContext={selectAndAnalyze}
-          onAddAlias={onAddAlias}
-          onEditDockerHost={onEditDockerHost}
-          onManageDeletedDockerHost={onManageDeletedDockerHost}
+          // Every action opens its dialog on top of the drawer, which stays on the same log
+          onAddAlias={(ip) => {
+            const alias = sources.aliases[ip];
+            openDrawerDialog({ kind: 'alias', initial: alias ? { ip, alias } : { ip }, editing: Boolean(alias) });
+          }}
+          onEditDockerHost={(endpointId) => {
+            const host = sources.dockerEndpoints.find((h) => h.id === endpointId);
+            if (host) openDrawerDialog({ kind: 'docker', host });
+          }}
+          onManageDeletedDockerHost={(host) => openDrawerDialog({ kind: 'deleted-docker', host })}
           dockerEndpoints={sources.dockerEndpoints}
           formerDockerAliases={sources.formerDockerAliases}
           isHostAliased={Boolean(
@@ -863,20 +893,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             await saveAlias({ ip, alias: name });
             bumpAliasVersion();
           }}
-          onCreateDropRule={(targetLog) => {
-            setActiveLogDetail(null);
-            setDropRuleTargetLog(targetLog);
-          }}
-          // The prefill goes through memory, not the URL: messages are long and may hold sensitive text
-          onCreateAlertRule={(targetLog) => {
-            setActiveLogDetail(null);
-            setAlertRuleHandoff({
-              hostName: targetLog.source_alias || targetLog.source_ip || undefined,
-              appName: targetLog.app_name || undefined,
-              message: cleanLogMessageForDisplay(targetLog.message),
+          onCreateDropRule={setDropRuleTargetLog}
+          onCreateAlertRule={async (targetLog) => {
+            // The dialog lists the notification channels, so they are read first; without them the rule can still be saved
+            const channels = await fetchNotificationChannels().catch(() => [] as NotificationChannel[]);
+            openDrawerDialog({
+              kind: 'alert',
+              prefill: alertRulePrefillFromLog(targetLog, facets.availableAppsForSelectedHosts),
+              channels,
             });
-            window.history.pushState(null, '', '/rules/rules');
-            window.dispatchEvent(new PopStateEvent('popstate'));
           }}
           onDeleteLog={(deletedLog) => {
             buffer.removeRows(new Set([deletedLog.id]));
@@ -891,6 +916,51 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           hasNewerLog={detailIndex > 0}
           hasOlderLog={detailIndex >= 0 && detailIndex < logs.length - 1}
         />
+      )}
+
+      {drawerDialog?.kind === 'alias' && (
+        <HostAliasFormModal
+          key={drawerDialog.key}
+          initial={drawerDialog.initial}
+          editing={drawerDialog.editing}
+          onClose={() => setDrawerDialog(null)}
+          onSaved={bumpAliasVersion}
+        />
+      )}
+      {drawerDialog?.kind === 'deleted-docker' && (
+        <DeletedDockerHostNotice
+          host={drawerDialog.host}
+          onClose={() => setDrawerDialog(null)}
+          onReAdd={(initialAddHost) => openDrawerDialog({ kind: 'docker', host: null, initialAddHost })}
+          onAddSyslogAlias={(ip) => openDrawerDialog({ kind: 'alias', initial: { ip }, editing: false })}
+        />
+      )}
+      {(drawerDialog?.kind === 'docker' || drawerDialog?.kind === 'alert') && (
+        <React.Suspense fallback={null}>
+          {drawerDialog.kind === 'docker' ? (
+            <DockerHostFormModal
+              key={drawerDialog.key}
+              editingHost={drawerDialog.host}
+              initialAddHost={drawerDialog.initialAddHost}
+              onClose={() => setDrawerDialog(null)}
+              onSaved={async () => bumpAliasVersion()}
+            />
+          ) : (
+            <AlertRuleModal
+              key={drawerDialog.key}
+              isOpen
+              ruleToEdit={null}
+              channels={drawerDialog.channels}
+              availableApps={facets.availableAppsForSelectedHosts}
+              availableHosts={facets.availableSourcesForSelectedApps}
+              selfReportedHosts={facets.selfReportedHosts}
+              isAiConfigured={aiEnabled}
+              prefill={drawerDialog.prefill}
+              onClose={() => setDrawerDialog(null)}
+              onSuccess={() => setDrawerDialog(null)}
+            />
+          )}
+        </React.Suspense>
       )}
 
       {/* Create Drop Rule Modal */}

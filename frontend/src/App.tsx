@@ -55,17 +55,10 @@ export const App: React.FC = () => {
   const { isAuthenticated, setupRequired, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<AppTab>(() => pathToTab(window.location.pathname));
   const [aiSelectedLogs, setAiSelectedLogs] = useState<LogEntry[]>([]);
-  const [addAliasIp, setAddAliasIp] = useState<string | null>(null);
-  const [editDockerHostId, setEditDockerHostId] = useState<number | null>(null);
-  const [deletedDockerHostInfo, setDeletedDockerHostInfo] = useState<{ name: string; ip: string } | null>(null);
   const [pendingSettingsSubTab, setPendingSettingsSubTab] = useState<SettingsSubTab | null>(null);
   const [clearSelectionSignal, setClearSelectionSignal] = useState<number>(0);
-  // Hand-offs from the log view (add alias, edit/manage a Docker host) only apply to the next
-  // visit that started them; leaving Settings drops them so they cannot reopen a modal later.
+  // The sub-tab the Console's first-run card asked for applies only to the visit it started
   const clearSettingsHandOffs = useCallback(() => {
-    setAddAliasIp(null);
-    setEditDockerHostId(null);
-    setDeletedDockerHostInfo(null);
     setPendingSettingsSubTab(null);
   }, []);
   const isMobile = useMediaQuery('(max-width: 767px)');
@@ -152,44 +145,10 @@ export const App: React.FC = () => {
     setAiSelectedLogs(logs);
   };
 
-  const handleAddAliasFromLog = (ip: string) => {
-    setAddAliasIp(ip);
-    setEditDockerHostId(null);
-    setDeletedDockerHostInfo(null);
-    setPendingSettingsSubTab('sources');
-    handleTabChange('settings');
-  };
-
-  const handleEditDockerHostFromLog = (endpointId: number) => {
-    setEditDockerHostId(endpointId);
-    setAddAliasIp(null);
-    setDeletedDockerHostInfo(null);
-    setPendingSettingsSubTab('sources');
-    handleTabChange('settings');
-  };
-
-  const handleManageDeletedDockerHost = (info: { name: string; ip: string }) => {
-    setDeletedDockerHostInfo(info);
-    setAddAliasIp(null);
-    setEditDockerHostId(null);
-    setPendingSettingsSubTab('sources');
-    handleTabChange('settings');
-  };
-
   // First-run card in the Console: "Set up Docker hosts" opens Settings on the Sources tab
   const handleOpenSourcesSettings = () => {
-    setAddAliasIp(null);
-    setEditDockerHostId(null);
-    setDeletedDockerHostInfo(null);
     setPendingSettingsSubTab('sources');
     handleTabChange('settings');
-  };
-
-  const handleClearSourcesState = () => {
-    setAddAliasIp(null);
-    setEditDockerHostId(null);
-    setDeletedDockerHostInfo(null);
-    setPendingSettingsSubTab(null);
   };
 
   const handleTabChange = (nextTab: AppTab) => {
@@ -279,9 +238,6 @@ export const App: React.FC = () => {
           <LiveLogStream
             onDiagnoseAi={handleOpenAiModal}
             onOpenSourcesSettings={handleOpenSourcesSettings}
-            onAddAlias={handleAddAliasFromLog}
-            onEditDockerHost={handleEditDockerHostFromLog}
-            onManageDeletedDockerHost={handleManageDeletedDockerHost}
             clearSelectionSignal={clearSelectionSignal}
             pullTouchHandlers={pullTouchHandlers}
           />
@@ -299,12 +255,6 @@ export const App: React.FC = () => {
           {activeTab === 'settings' && (
             <SettingsPanel
               initialSubTab={pendingSettingsSubTab || undefined}
-              initialAddIp={addAliasIp}
-              initialEditDockerHostId={editDockerHostId}
-              initialDeletedDockerHostInfo={deletedDockerHostInfo}
-              onAliasSaved={handleClearSourcesState}
-              onDockerHostSaved={handleClearSourcesState}
-              onClearSourcesState={handleClearSourcesState}
               onDirtyChange={setIsSettingsDirty}
               saveTriggerRef={saveSettingsTriggerRef}
             />

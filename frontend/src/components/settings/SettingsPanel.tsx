@@ -83,34 +83,15 @@ const INTERNAL_LOG_LEVEL_OPTIONS: SelectOption[] = [
 
 export interface SettingsPanelProps {
   initialSubTab?: SettingsSubTab;
-  initialAddIp?: string | null;
-  initialEditDockerHostId?: number | null;
-  initialDeletedDockerHostInfo?: { name: string; ip: string } | null;
-  onAliasSaved?: () => void;
-  onDockerHostSaved?: () => void;
-  onClearSourcesState?: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
   saveTriggerRef?: React.MutableRefObject<(() => Promise<boolean>) | null>;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   initialSubTab,
-  initialAddIp,
-  initialEditDockerHostId,
-  initialDeletedDockerHostInfo,
-  onAliasSaved,
-  onDockerHostSaved,
-  onClearSourcesState,
   onDirtyChange,
   saveTriggerRef,
 }) => {
-  const [activeAddIp, setActiveAddIp] = useState<string | null>(initialAddIp || null);
-
-  useEffect(() => {
-    if (initialAddIp) {
-      setActiveAddIp(initialAddIp);
-    }
-  }, [initialAddIp]);
   const [settings, setSettings] = useState<SettingsResponseData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -555,24 +536,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* Sub-tab 2: Sources (Host Aliases + Docker Hosts) */}
       {activeSubTab === 'sources' && (
         <div className="space-y-6">
-          <HostAliasManager
-            initialAddIp={activeAddIp}
-            onCancel={() => {
-              setActiveAddIp(null);
-              if (onClearSourcesState) onClearSourcesState();
-            }}
-            onAliasSaved={() => {
-              setActiveAddIp(null);
-              if (onAliasSaved) onAliasSaved();
-            }}
-          />
-          <DockerHostsTab
-            initialEditEndpointId={initialEditDockerHostId}
-            initialDeletedHostInfo={initialDeletedDockerHostInfo}
-            onHostSaved={onDockerHostSaved}
-            onAddSyslogAlias={(targetIp) => setActiveAddIp(targetIp)}
-            onClearSourcesState={onClearSourcesState}
-          />
+          <HostAliasManager />
+          <DockerHostsTab />
         </div>
       )}
 

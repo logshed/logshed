@@ -10,7 +10,9 @@ import * as aliasesApi from '../api/aliases.ts';
 import * as dockerHostsApi from '../api/dockerHosts.ts';
 import { LogEntry } from '../types.ts';
 import { AliasContext } from '../context/AliasContext.tsx';
-import { takeAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
+import * as notificationsApi from '../api/notifications.ts';
+import * as alertsApi from '../api/alerts.ts';
+import { DockerEndpoint } from '../types.ts';
 import { MockEventSource, virtualizerControl, sampleLogs, renderWithContext, setupConsoleMocks, setupStreamMocks, setupConsoleControlsMocks } from './liveLogStreamSetup.tsx';
 
 vi.mock('@tanstack/react-virtual', async () => (await import('./liveLogStreamVirtualizer.ts')).virtualizerMock);
@@ -618,46 +620,139 @@ describe('Console selection, AI and drawer controls', () => {
   });
 });
 
-describe('LiveLogStream "Create Alert Rule" hand-off', () => {
+describe('Log drawer actions open dialogs over the drawer', () => {
+  const bump = vi.fn();
   const renderStream = () =>
     render(
-      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: bump }}>
         <LiveLogStream onDiagnoseAi={vi.fn()} />
       </AliasContext.Provider>
     );
+  const endpoint: DockerEndpoint = {
+    id: 7,
+    name: 'nas-docker',
+    url: 'tcp://192.168.1.60:2375',
+    source_alias: 'nas-docker',
+    enabled: true,
+    tls_enabled: false,
+    exclude_containers: '',
+    created_at: '2026-09-01T00:00:00Z',
+    updated_at: '2026-09-01T00:00:00Z',
+  };
+  const dockerLog: LogEntry = {
+    id: 201,
+    timestamp: '2026-09-03T14:31:00.000Z',
+    received_at: '2026-09-03T14:31:00.010Z',
+    source_ip: '192.168.1.60',
+    source_alias: 'nas-docker',
+    app_name: 'jellyfin',
+    facility: 1,
+    severity: 6,
+    message: 'Container log line',
+    raw: 'Container log line',
+    source_kind: 'docker',
+  };
+  const goneDockerLog: LogEntry = { ...dockerLog, id: 202, source_ip: '192.168.1.70', source_alias: 'old-docker', message: 'Old container line', raw: 'Old container line' };
+  const unnamedLog: LogEntry = { ...sampleLogs[2], id: 203, source_ip: '10.0.0.9', source_alias: '10.0.0.9', message: 'Unnamed sender line', raw: '<14>Unnamed sender line' };
 
   beforeEach(() => {
-    window.history.replaceState(null, '', '/?q=nginx');
+    window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
+    bump.mockClear();
     MockEventSource.instances = [];
     virtualizerControl.edgeRows = null;
     virtualizerControl.headOnly = false;
-    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs: [...sampleLogs], total: sampleLogs.length, limit: 500, offset: 0 });
-    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({ sources: [], apps: [], host_to_apps: {}, app_to_hosts: {} } as any);
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs: [...sampleLogs, dockerLog, goneDockerLog, unnamedLog], total: 7, limit: 500, offset: 0 });
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({ sources: ['homelab-host'], apps: ['nginx'], host_to_apps: {}, app_to_hosts: {} } as any);
     vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
-    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([endpoint]);
     vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({} as any);
+    vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue([]);
   });
 
-  it('closes the drawer, stores the host, app and message in memory and switches to Alert Rules without URL params', async () => {
-    const popstate = vi.fn();
-    window.addEventListener('popstate', popstate);
+  const openDrawer = async (message: string, record: number) => {
     renderStream();
-    fireEvent.click(await screen.findByText('Nginx upstream connection timeout'));
-    fireEvent.click(await screen.findByRole('button', { name: /Create Alert Rule/i }));
-    window.removeEventListener('popstate', popstate);
+    fireEvent.click(await screen.findByText(message));
+    return screen.findByRole('dialog', { name: new RegExp(`Log Record #${record}`) });
+  };
 
-    expect(popstate).toHaveBeenCalled();
-    expect(window.location.pathname).toBe('/rules/rules');
-    expect(window.location.search).toBe('');
-    expect(takeAlertRuleHandoff()).toEqual({
-      hostName: 'homelab-host',
-      appName: 'nginx',
-      message: 'Nginx upstream connection timeout',
-    });
-    // Read once only
-    expect(takeAlertRuleHandoff()).toBeNull();
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Create Alert Rule/i })).toBeNull());
-    window.history.replaceState(null, '', '/');
+  it('Create Alert Rule opens the prefilled rule dialog on top, and the drawer is there after it', async () => {
+    const drawer = await openDrawer('Nginx upstream connection timeout', 101);
+    fireEvent.click(within(drawer).getByRole('button', { name: /Create Alert Rule/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Create New Alert Rule' });
+    await waitFor(() => expect(within(dialog).getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
+    expect(within(dialog).getByLabelText('From log')).toHaveValue('Nginx upstream connection timeout');
+    expect(window.location.pathname).toBe('/');
+    expect(screen.getByRole('dialog', { name: /Log Record #101/ })).toBeInTheDocument();
+
+    const create = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ id: 9 } as any);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Alert on nginx', filter_app: 'nginx', filter_host: 'homelab-host' }))
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create New Alert Rule' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: /Log Record #101/ })).toBeInTheDocument();
+  });
+
+  it('Create Drop Rule opens on top of the drawer, which stays on the same log', async () => {
+    const drawer = await openDrawer('Nginx upstream connection timeout', 101);
+    fireEvent.click(within(drawer).getByRole('button', { name: /Create Drop Rule/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Drop Rule/i });
+    expect(screen.getByRole('dialog', { name: /Log Record #101/ })).toBeInTheDocument();
+    // The form fills itself in right after it opens
+    await waitFor(() => expect(within(dialog).getByDisplayValue('Drop nginx Chatter')).toBeInTheDocument());
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Drop Rule/i })).toBeNull());
+    expect(screen.getByRole('dialog', { name: /Log Record #101/ })).toBeInTheDocument();
+  });
+
+  it('Add Host Alias opens the alias dialog with the address, saves, and reloads the names', async () => {
+    const save = vi.spyOn(aliasesApi, 'saveAlias').mockResolvedValue({} as any);
+    const drawer = await openDrawer('Unnamed sender line', 203);
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Add Host Alias' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add Host Alias' });
+    expect(within(dialog).getByLabelText(/Source IP Address/)).toHaveValue('10.0.0.9');
+    fireEvent.change(within(dialog).getByLabelText(/Friendly Host Alias/), { target: { value: 'printer' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Mapping' }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ ip: '10.0.0.9', alias: 'printer', notes: null }));
+    await waitFor(() => expect(bump).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog', { name: 'Add Host Alias' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: /Log Record #203/ })).toBeInTheDocument();
+  });
+
+  it('Modify Host Alias opens the alias dialog for editing, with its name', async () => {
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([{ ip: '192.168.1.1', alias: 'opnsense-router' } as any]);
+    const drawer = await openDrawer('Default deny rule matched WAN block', 103);
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Modify Host Alias' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Host Alias - 192.168.1.1' });
+    expect(within(dialog).getByLabelText(/Friendly Host Alias/)).toHaveValue('opnsense-router');
+    expect(within(dialog).getByLabelText(/Source IP Address/)).toBeDisabled();
+  });
+
+  it('Edit Docker Host opens the Docker host dialog for that host', async () => {
+    const drawer = await openDrawer('Container log line', 201);
+    fireEvent.click(await within(drawer).findByRole('button', { name: 'Edit Docker Host' }));
+    const dialog = await screen.findByRole('dialog', { name: /Docker Host/ });
+    expect(within(dialog).getByDisplayValue('tcp://192.168.1.60:2375')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: /Log Record #201/ })).toBeInTheDocument();
+  });
+
+  it('Configure Docker Host explains a deleted host, then re-adds it or adds a syslog alias, all over the drawer', async () => {
+    const drawer = await openDrawer('Old container line', 202);
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Configure Docker Host' }));
+    let notice = await screen.findByRole('dialog', { name: 'Docker Host Not Configured' });
+    fireEvent.click(within(notice).getByRole('button', { name: 'Re-add Docker Host' }));
+    const form = await screen.findByRole('dialog', { name: /Docker Host/ });
+    expect(within(form).getByDisplayValue('tcp://192.168.1.70:2375')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Docker Host Not Configured' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: /Log Record #202/ })).toBeInTheDocument();
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Docker Host/ })).toBeNull());
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Configure Docker Host' }));
+    notice = await screen.findByRole('dialog', { name: 'Docker Host Not Configured' });
+    fireEvent.click(within(notice).getByRole('button', { name: 'Add Syslog Host Alias' }));
+    const alias = await screen.findByRole('dialog', { name: 'Add Host Alias' });
+    expect(within(alias).getByLabelText(/Source IP Address/)).toHaveValue('192.168.1.70');
   });
 });

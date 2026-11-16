@@ -206,7 +206,6 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     } else {
       onExplainWithAi(log, targetAndContextLogs);
     }
-    onClose();
   };
 
   // The source kind says which collector stored the log; logs stored before 1.4.0 have none, and
@@ -315,7 +314,6 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                 type="button"
                 onClick={() => {
                   onEditDockerHost(matchedDockerEndpoint.id);
-                  onClose();
                 }}
                 className={`${buttonClass('secondary', 'md')} justify-center`}
               >
@@ -330,7 +328,6 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                     name: log.source_alias,
                     ip: log.source_ip,
                   });
-                  onClose();
                 }}
                 className={`${buttonClass('secondary', 'md')} justify-center`}
               >
@@ -343,7 +340,6 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   type="button"
                   onClick={() => {
                     onAddAlias(log.source_ip);
-                    onClose();
                   }}
                   className={`${buttonClass('secondary', 'md')} justify-center`}
                 >
@@ -355,7 +351,6 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   type="button"
                   onClick={() => {
                     onAddAlias(log.source_ip);
-                    onClose();
                   }}
                   className={`${buttonClass('secondary', 'md')} justify-center`}
                 >

@@ -1,27 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Server, Plus, Trash2, Edit2, AlertCircle, Loader2, ScrollText } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Server, Plus, Trash2, Edit2, AlertCircle, ScrollText } from 'lucide-react';
 import { HostAlias, SelfReportedHost } from '../../types.ts';
 import { fetchAliases, fetchSelfReportedHosts, saveAlias, deleteAlias } from '../../api/aliases.ts';
+import { HostAliasFormModal, HostAliasFormValues } from './HostAliasFormModal.tsx';
 import { useMediaQuery, useNow, usePolling, useServerTimezone } from '../../utils/hooks.ts';
-import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
 import { Button, IconButton } from '../common/Button.tsx';
 import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
-import { TextField } from '../common/Field.tsx';
 import { Badge } from '../common/Badge.tsx';
 import { TABLE_HEAD_ROW } from '../common/Table.tsx';
 import { LastSeen } from '../common/LastSeen.tsx';
 
 // How often the rows' last-seen times are fetched again while the page is open
 const LAST_SEEN_REFRESH_MS = 30_000;
-
-interface HostAliasManagerProps {
-  initialAddIp?: string | null;
-  onAliasSaved?: () => void;
-  /** Called when the Add / Edit modal is dismissed without saving, so a hand-off can be cleared. */
-  onCancel?: () => void;
-}
 
 /** A mapping's row actions: its logs in the Console, edit and delete. */
 const AliasRowActions: React.FC<{
@@ -98,11 +90,7 @@ const SelfReportedBadge: React.FC<{ host: SelfReportedHost }> = ({ host }) => (
   </Badge>
 );
 
-export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
-  initialAddIp,
-  onAliasSaved,
-  onCancel,
-}) => {
+export const HostAliasManager: React.FC = () => {
   const { bumpAliasVersion } = useAlias();
   const [aliases, setAliases] = useState<HostAlias[]>([]);
   const [selfReported, setSelfReported] = useState<SelfReportedHost[]>([]);
@@ -115,21 +103,14 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Add / Edit Modal state
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [editingIp, setEditingIp] = useState<string | null>(null);
-  const [ip, setIp] = useState<string>('');
-  const [alias, setAlias] = useState<string>('');
-  const [notes, setNotes] = useState<string>('');
-  const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [modalError, setModalError] = useState<string | null>(null);
+  // The Add / Edit dialog while it is open; a new key starts it afresh
+  const [form, setForm] = useState<{ key: number; initial: HostAliasFormValues; editing: boolean } | null>(null);
+  const openForm = (initial: HostAliasFormValues, editing: boolean) =>
+    setForm((prev) => ({ key: (prev?.key ?? 0) + 1, initial, editing }));
 
   // Delete Modal state
   const [isDeletingIp, setIsDeletingIp] = useState<string | null>(null);
   const [deleteTargetIp, setDeleteTargetIp] = useState<string | null>(null);
-
-  // A hand-off IP the user already dismissed must not reopen the modal when the alias list reloads.
-  const dismissedAddIpRef = useRef<string | null>(null);
 
   // The self-reported rows load on their own: the alias list does not wait for them, and a failure leaves them out
   const loadSelfReported = () => {
@@ -168,54 +149,12 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
     loadSelfReported();
   }, LAST_SEEN_REFRESH_MS);
 
-  useEffect(() => {
-    if (initialAddIp && initialAddIp !== dismissedAddIpRef.current) {
-      const existing = aliases.find((a) => a.ip === initialAddIp);
-      if (existing) {
-        setEditingIp(existing.ip);
-        setIp(existing.ip);
-        setAlias(existing.alias);
-        setNotes(existing.notes || '');
-      } else {
-        setEditingIp(null);
-        setIp(initialAddIp);
-        setAlias('');
-        setNotes('');
-      }
-      setModalError(null);
-      setIsModalOpen(true);
-    } else if (!initialAddIp) {
-      dismissedAddIpRef.current = null;
-    }
-  }, [initialAddIp, aliases]);
+  const openAddModal = () => openForm({ ip: '' }, false);
 
-  const openAddModal = () => {
-    setEditingIp(null);
-    setIp('');
-    setAlias('');
-    setNotes('');
-    setModalError(null);
-    setIsModalOpen(true);
-  };
-
-  const openEditModal = (item: HostAlias) => {
-    setEditingIp(item.ip);
-    setIp(item.ip);
-    setAlias(item.alias);
-    setNotes(item.notes || '');
-    setModalError(null);
-    setIsModalOpen(true);
-  };
+  const openEditModal = (item: HostAlias) => openForm({ ip: item.ip, alias: item.alias, notes: item.notes }, true);
 
   /** Add Host Alias with the address and the name it reported filled in. */
-  const openAddFromReported = (host: SelfReportedHost) => {
-    setEditingIp(null);
-    setIp(host.ip);
-    setAlias(host.names[0] ?? '');
-    setNotes('');
-    setModalError(null);
-    setIsModalOpen(true);
-  };
+  const openAddFromReported = (host: SelfReportedHost) => openForm({ ip: host.ip, alias: host.names[0] ?? '' }, false);
 
   /** Saves the reported name as the address's alias at once, as the log drawer's Make it the alias does. */
   const handleMakeAlias = async (host: SelfReportedHost) => {
@@ -226,7 +165,6 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       await saveAlias({ ip: host.ip, alias: host.names[0] });
       await loadAliases();
       bumpAliasVersion();
-      if (onAliasSaved) onAliasSaved();
     } catch (err: any) {
       setErrorMsg(err.message || 'The alias could not be saved.');
     } finally {
@@ -240,44 +178,6 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
     window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setEditingIp(null);
-    setIp('');
-    setAlias('');
-    setNotes('');
-    setModalError(null);
-  };
-
-  const handleCancelModal = () => {
-    dismissedAddIpRef.current = initialAddIp || null;
-    handleCloseModal();
-    if (onCancel) onCancel();
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ip.trim() || !alias.trim()) return;
-
-    try {
-      setIsSaving(true);
-      setModalError(null);
-      await saveAlias({
-        ip: ip.trim(),
-        alias: alias.trim(),
-        notes: notes.trim() || null,
-      });
-      handleCloseModal();
-      await loadAliases();
-      bumpAliasVersion();
-      if (onAliasSaved) onAliasSaved();
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to save host alias mapping.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const handleConfirmDelete = async () => {
     if (!deleteTargetIp) return;
     const targetIp = deleteTargetIp;
@@ -287,7 +187,6 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       setDeleteTargetIp(null);
       await loadAliases();
       bumpAliasVersion();
-      if (onAliasSaved) onAliasSaved();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to delete host alias.');
       setDeleteTargetIp(null);
@@ -464,64 +363,17 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       </Card>
 
       {/* Add / Edit Host Alias Modal */}
-      {isModalOpen && (
-        <Modal
-          isOpen={isModalOpen}
-          onClose={handleCancelModal}
-          title={editingIp ? `Edit Host Alias - ${editingIp}` : 'Add Host Alias'}
-          maxWidth="max-w-md"
-        >
-          <form onSubmit={handleSave} className="space-y-4">
-            {modalError && (
-              <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
-                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
-                <span>{modalError}</span>
-              </div>
-            )}
-
-            <TextField
-              label="Source IP Address"
-              hint={editingIp ? 'Source IP cannot be modified while editing. Delete and re-create to change the IP.' : undefined}
-              type="text"
-              value={ip}
-              onChange={(e) => setIp(e.target.value)}
-              disabled={Boolean(editingIp)}
-              placeholder="e.g. 192.168.1.50"
-              required
-              mono
-            />
-
-            <TextField
-              label="Friendly Host Alias"
-              type="text"
-              value={alias}
-              onChange={(e) => setAlias(e.target.value)}
-              placeholder="e.g. Proxmox-Node-01"
-              required
-              mono
-            />
-
-            <TextField
-              label="Notes (Optional)"
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Main hypervisor in rack 1"
-            />
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-line-subtle">
-              <Button onClick={handleCancelModal}>Cancel</Button>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={isSaving || !ip.trim() || !alias.trim()}
-                icon={isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
-              >
-                {isSaving ? 'Saving...' : editingIp ? 'Update Mapping' : 'Add Mapping'}
-              </Button>
-            </div>
-          </form>
-        </Modal>
+      {form && (
+        <HostAliasFormModal
+          key={form.key}
+          initial={form.initial}
+          editing={form.editing}
+          onClose={() => setForm(null)}
+          onSaved={async () => {
+            await loadAliases();
+            bumpAliasVersion();
+          }}
+        />
       )}
 
       {/* Delete Host Alias Confirmation Modal */}

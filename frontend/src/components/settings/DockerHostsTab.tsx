@@ -25,7 +25,6 @@ import {
 } from '../../api/dockerHosts.ts';
 import { useMediaQuery, useNow, usePolling, useServerTimezone } from '../../utils/hooks.ts';
 import { LastSeen } from '../common/LastSeen.tsx';
-import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { DockerHostFormModal } from './DockerHostFormModal.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
@@ -35,12 +34,7 @@ import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
 import { TableHead } from '../common/Table.tsx';
 
 export interface DockerHostsTabProps {
-  initialEditEndpointId?: number | null;
   initialAddHost?: { name?: string; url?: string; source_alias?: string } | null;
-  initialDeletedHostInfo?: { name: string; ip: string } | null;
-  onHostSaved?: () => void;
-  onAddSyslogAlias?: (ip: string) => void;
-  onClearSourcesState?: () => void;
 }
 
 /**
@@ -66,14 +60,7 @@ function lastSeenById(list: DockerEndpoint[]): Record<number, string | null | un
   return Object.fromEntries(list.map((h) => [h.id, h.last_seen]));
 }
 
-export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
-  initialEditEndpointId,
-  initialAddHost,
-  initialDeletedHostInfo,
-  onHostSaved,
-  onAddSyslogAlias,
-  onClearSourcesState,
-}) => {
+export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({ initialAddHost }) => {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const { bumpAliasVersion } = useAlias();
   const [hosts, setHosts] = useState<DockerEndpoint[]>([]);
@@ -102,17 +89,6 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   // Delete Modal
   const [hostToDelete, setHostToDelete] = useState<DockerEndpoint | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
-
-  // Deleted host notice modal state
-  const [deletedHostNotice, setDeletedHostNotice] = useState<{ name: string; ip: string } | null>(
-    initialDeletedHostInfo || null
-  );
-
-  useEffect(() => {
-    if (initialDeletedHostInfo) {
-      setDeletedHostNotice(initialDeletedHostInfo);
-    }
-  }, [initialDeletedHostInfo]);
 
   const loadHosts = async () => {
     try {
@@ -148,17 +124,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
 
   const handleCloseModal = () => {
     setFormModal(null);
-    if (onClearSourcesState) onClearSourcesState();
   };
-
-  useEffect(() => {
-    if (initialEditEndpointId && hosts.length > 0) {
-      const targetHost = hosts.find((h) => h.id === initialEditEndpointId);
-      if (targetHost) {
-        openEditModal(targetHost);
-      }
-    }
-  }, [initialEditEndpointId, hosts]);
 
   useEffect(() => {
     if (initialAddHost) {
@@ -504,7 +470,6 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
             handleCloseModal();
             await loadHosts();
             bumpAliasVersion();
-            if (onHostSaved) onHostSaved();
           }}
         />
       )}
@@ -531,84 +496,6 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
         </div>
       </ConfirmDialog>
 
-      {/* Notice Modal when navigated to a Docker host that has been deleted */}
-      {deletedHostNotice && (
-        <Modal
-          isOpen={!!deletedHostNotice}
-          onClose={() => {
-            setDeletedHostNotice(null);
-            if (onClearSourcesState) onClearSourcesState();
-          }}
-          title="Docker Host Not Configured"
-          maxWidth="max-w-md"
-        >
-          <div className="space-y-4 text-xs font-sans">
-            <div className="flex items-start gap-3 p-3 bg-warning-950/30 border border-warning-800/60 rounded-lg text-fg">
-              <AlertTriangle className="w-5 h-5 text-warning-400 shrink-0 mt-0.5" />
-              <div className="space-y-2 flex-1">
-                <p className="font-semibold text-fg-strong text-xs">
-                  Docker host endpoint not found
-                </p>
-                <p className="text-fg-muted leading-relaxed">
-                  The Docker host endpoint for <span className="font-mono text-fg font-semibold">{deletedHostNotice.name}</span> is no longer configured in LogShed. You can re-add it as a Docker host or map its IP address as a Syslog host alias.
-                </p>
-                <p className="text-fg-muted leading-relaxed">
-                  Its old container logs keep their Docker label either way: a Syslog host alias applies only to the syslog logs from that address.
-                </p>
-                <div className="p-2.5 rounded-sm bg-canvas/80 border border-line font-mono text-[11px] text-fg-soft space-y-1">
-                  <div>
-                    <span className="text-fg-muted">Host / Alias:</span> {deletedHostNotice.name}
-                  </div>
-                  <div>
-                    <span className="text-fg-muted">Source IP:</span> {deletedHostNotice.ip}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2 border-t border-line">
-              <Button
-                onClick={() => {
-                  setDeletedHostNotice(null);
-                  if (onClearSourcesState) onClearSourcesState();
-                }}
-              >
-                Close
-              </Button>
-              {onAddSyslogAlias && deletedHostNotice.ip && deletedHostNotice.ip !== 'docker' && (
-                <Button
-                  onClick={() => {
-                    const targetIp = deletedHostNotice.ip;
-                    setDeletedHostNotice(null);
-                    if (onClearSourcesState) onClearSourcesState();
-                    onAddSyslogAlias(targetIp);
-                  }}
-                >
-                  Add Syslog Host Alias
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                onClick={() => {
-                  const targetInfo = deletedHostNotice;
-                  setDeletedHostNotice(null);
-                  if (onClearSourcesState) onClearSourcesState();
-                  openAddModal({
-                    name: targetInfo.name,
-                    source_alias: targetInfo.name,
-                    url:
-                      targetInfo.ip && targetInfo.ip !== 'docker'
-                        ? `tcp://${targetInfo.ip}:2375`
-                        : 'unix:///var/run/docker.sock',
-                  });
-                }}
-              >
-                Re-add Docker Host
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 };

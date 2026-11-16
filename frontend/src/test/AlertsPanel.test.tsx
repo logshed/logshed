@@ -8,7 +8,6 @@ import * as dropRulesApi from '../api/dropRules.ts';
 import * as logsApi from '../api/logs.ts';
 import * as settingsApi from '../api/settings.ts';
 import type { SettingsResponseData } from '../api/settings.ts';
-import { setAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 import { stubDownloads } from './downloadStubs.ts';
 import { ApiError } from '../api/client.ts';
 import { chooseOption, shownValue } from './selectDropdownHelpers.ts';
@@ -1592,68 +1591,6 @@ describe('AlertsPanel hand-offs', () => {
     vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
     vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({ sources: [], apps: ['nginx', 'sshd'], host_to_apps: {}, app_to_hosts: {} } as any);
-  });
-
-  it('opens the new-rule dialog once, prefilled from the log hand-off', async () => {
-    setAlertRuleHandoff({ appName: 'nginx', message: 'Nginx upstream connection timeout' });
-    render(<AlertsPanel />);
-
-    // The dialog fills its fields in an effect right after it opens
-    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
-    expect(screen.getByRole('heading', { name: 'Create New Alert Rule' })).toBeInTheDocument();
-    expect(screen.getByLabelText('From log')).toHaveValue('Nginx upstream connection timeout');
-
-    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRules[0], id: 9, name: 'Alert on nginx' });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
-    await waitFor(() =>
-      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'Alert on nginx', filter_app: 'nginx' }))
-    );
-  });
-
-  it('fills the host filter with the log\'s host as well as the app', async () => {
-    setAlertRuleHandoff({ hostName: 'nas', appName: 'nginx', message: 'Nginx upstream connection timeout' });
-    render(<AlertsPanel />);
-    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
-    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRules[0], id: 9 });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
-    await waitFor(() =>
-      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ filter_host: 'nas', filter_app: 'nginx' }))
-    );
-  });
-
-  it('names the rule after the host when the log has no app', async () => {
-    setAlertRuleHandoff({ hostName: '192.168.1.9', message: 'link down' });
-    render(<AlertsPanel />);
-    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on 192.168.1.9'));
-  });
-
-  it('leaves the app filter empty when the app is not among the known apps', async () => {
-    setAlertRuleHandoff({ appName: 'mystery-app', message: 'hello' });
-    render(<AlertsPanel />);
-    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on mystery-app'));
-    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRules[0], id: 9 });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
-    await waitFor(() => expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ filter_app: null })));
-  });
-
-  it('stays on Alert Rules after closing, and "New Alert Rule" then opens a blank dialog', async () => {
-    setAlertRuleHandoff({ appName: 'nginx', message: 'Nginx upstream connection timeout' });
-    render(<AlertsPanel />);
-    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Create New Alert Rule' })).toBeNull());
-    expect(window.location.pathname).toBe('/rules/rules');
-    expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /New Alert Rule/i }));
-    expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('');
-    expect(screen.queryByTestId('alert-rule-log-reference')).toBeNull();
-  });
-
-  it('does not open the dialog without a hand-off', async () => {
-    render(<AlertsPanel />);
-    await screen.findByText('SSH Brute-Force Detection');
-    expect(screen.queryByRole('heading', { name: 'Create New Alert Rule' })).toBeNull();
   });
 
   it('opens the Console from the incident with the loaded rule window', async () => {

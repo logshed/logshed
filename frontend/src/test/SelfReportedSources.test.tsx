@@ -15,10 +15,10 @@ const REPORTED: SelfReportedHosts = {
   limit: 200,
 };
 
-const renderManager = (onAliasSaved = vi.fn(), bumpAliasVersion = vi.fn()) =>
+const renderManager = (bumpAliasVersion = vi.fn()) =>
   render(
     <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion }}>
-      <HostAliasManager onAliasSaved={onAliasSaved} />
+      <HostAliasManager />
     </AliasContext.Provider>
   );
 
@@ -51,9 +51,8 @@ describe('Self-reported hosts on Settings -> Sources', () => {
     const saveSpy = vi.spyOn(aliasesApi, 'saveAlias').mockResolvedValue({
       ip: '172.17.0.4', alias: 'hp-m404', created_at: '2026-11-15T12:00:00Z',
     });
-    const onAliasSaved = vi.fn();
     const bump = vi.fn();
-    renderManager(onAliasSaved, bump);
+    renderManager(bump);
 
     const row = await screen.findByTestId('self-reported-row');
     vi.mocked(aliasesApi.fetchSelfReportedHosts).mockResolvedValue({ ...REPORTED, hosts: [] });
@@ -62,7 +61,6 @@ describe('Self-reported hosts on Settings -> Sources', () => {
     await waitFor(() => expect(screen.queryByTestId('self-reported-row')).not.toBeInTheDocument());
     expect(saveSpy).toHaveBeenCalledWith({ ip: '172.17.0.4', alias: 'hp-m404' });
     expect(bump).toHaveBeenCalled();
-    expect(onAliasSaved).toHaveBeenCalled();
   });
 
   it('shows why Make it the alias failed, and keeps the row', async () => {

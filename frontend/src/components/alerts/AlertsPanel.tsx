@@ -42,7 +42,6 @@ import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal, AlertRulePrefill } from './AlertRuleModal.tsx';
-import { AlertRuleHandoff, takeAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
 import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
@@ -143,8 +142,6 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   const [isRuleModalOpen, setIsRuleModalOpen] = useState<boolean>(false);
   const [ruleToEdit, setRuleToEdit] = useState<AlertRule | null>(null);
   const [rulePrefill, setRulePrefill] = useState<AlertRulePrefill | null>(null);
-  const pendingRuleHandoffRef = useRef<AlertRuleHandoff | null>(null);
-  const [initialLoadDone, setInitialLoadDone] = useState<boolean>(false);
   const [ruleToDelete, setRuleToDelete] = useState<AlertRule | null>(null);
   const [isTestModalOpen, setIsTestModalOpen] = useState<boolean>(false);
   const [ruleToTest, setRuleToTest] = useState<AlertRule | null>(null);
@@ -230,8 +227,6 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to load alert configuration.', isError: true });
-    } finally {
-      setInitialLoadDone(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the setters it calls are stable; showFirstPage only calls state setters
   }, []);
@@ -253,31 +248,6 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     setRulePrefill(null);
     setIsRuleModalOpen(true);
   };
-
-  // "Create Alert Rule" from a log: take the hand-off once on mount, then open the prefilled dialog
-  // after the first load, so the channels are in and the app can be checked against the known apps.
-  useEffect(() => {
-    const handoff = takeAlertRuleHandoff();
-    if (handoff) pendingRuleHandoffRef.current = handoff;
-  }, []);
-
-  useEffect(() => {
-    if (!initialLoadDone) return;
-    const handoff = pendingRuleHandoffRef.current;
-    if (!handoff) return;
-    pendingRuleHandoffRef.current = null;
-    const appName = handoff.appName?.trim() || '';
-    const hostName = handoff.hostName?.trim() || '';
-    setRulePrefill({
-      name: appName ? `Alert on ${appName}` : hostName ? `Alert on ${hostName}` : '',
-      filterApps: appName && availableApps.includes(appName) ? [appName] : [],
-      filterHosts: hostName ? [hostName] : [],
-      referenceMessage: handoff.message || '',
-    });
-    setRuleToEdit(null);
-    setActiveSubTab('rules');
-    setIsRuleModalOpen(true);
-  }, [initialLoadDone, availableApps]);
 
   // Handle saved rule from AlertRuleModal
   const handleRuleSuccess = (savedRule: AlertRule) => {
