@@ -1055,7 +1055,9 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
       await screen.findByText('DNS server connection refused.');
 
-      expect(scrollsToTop()).toHaveLength(1);
+      // The scroll runs in an effect just after the result is shown: on a slow machine it can come
+      // after the text is found
+      await waitFor(() => expect(scrollsToTop()).toHaveLength(1));
       // The dialog's content root is scrolled to, so the dialog body ends at its very top
       const root = scrollSpy.mock.contexts[0] as HTMLElement;
       expect(root).toContainElement(screen.getByText('DNS server connection refused.'));
