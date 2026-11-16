@@ -133,11 +133,11 @@ export function isTextModel(modelId: string): boolean {
 }
 
 /** A model as a row of the model dropdowns: its id, marked when it can reason. */
-/** A price per million tokens: $0.075, $1.25, $15. */
+/** A price per million tokens to three significant figures: $0.075, $0.125, $1.25, $15; below a tenth of a cent, <$0.001. */
 function formatPrice(perMillion: number): string {
   if (perMillion === 0) return '$0';
-  const digits = perMillion < 0.1 ? 3 : 2;
-  return `$${Number(perMillion.toFixed(digits))}`;
+  if (perMillion < 0.001) return '<$0.001';
+  return `$${Number(perMillion.toPrecision(3))}`;
 }
 
 /** A context size in tokens: 128K, 1M, 1.05M. */

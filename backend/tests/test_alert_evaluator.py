@@ -2181,6 +2181,66 @@ class TestAlertEnrichmentAiSettings:
         assert captured["timeout"] == 90.0
         assert captured["thinking_level"] == "medium"
         assert captured["provider"] == "ollama"
+        assert captured["model_params"] is None
+
+    @pytest.mark.asyncio
+    async def test_enrichment_with_openrouter_uses_its_address_and_the_model_params(self, tmp_path: Path, monkeypatch):
+        import json
+
+        db_file = tmp_path / "alerts_or.db"
+        run_migrations(db_file)
+        _turn_ai_on(db_file)
+        params = {"supports_reasoning": True, "reasoning_mandatory": False, "reasoning_efforts": ["low", "none"], "takes_temperature": True}
+        conn = get_connection(db_file)
+        conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, match_pattern, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES ('OpenRouter Probe', 'threshold', 'boom', 1, 60, 300, 1, 1, ?)
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        for key, value in (
+            ("ai_provider", "openrouter"),
+            ("ai_model_openrouter", "openai/gpt-6-luna"),
+            # Left from the provider used before: never used for OpenRouter
+            ("ai_base_url", "http://ollama.lan:11434/v1"),
+            ("ai_models_cache_openrouter", json.dumps([{"id": "openai/gpt-6-luna", "name": "Luna", "params": params}])),
+        ):
+            conn.execute(
+                "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, datetime('now'), 0)", (key, value)
+            )
+        conn.commit()
+        conn.close()
+
+        captured: dict = {}
+
+        async def mock_execute_ai_analysis(**kwargs):
+            captured.update(kwargs)
+            return AiAnalysisResult(
+                summary="summary", root_cause="", remediation="", raw_response="raw", prompt_sent="prompt",
+                tokens_in=1, tokens_out=1, tokens_thoughts=0, tokens_used=2, model_used=kwargs.get("model"),
+            )
+
+        import app.services.ai_engine as ai_engine
+        monkeypatch.setattr(ai_engine, "execute_ai_analysis", mock_execute_ai_analysis)
+
+        async def mock_send(self, title, body, channel_id=None):
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(db_file)
+        await evaluator.evaluate_batch(
+            [{"id": 1, "app_name": "svc", "message": "boom", "timestamp": datetime.now(timezone.utc).isoformat()}]
+        )
+        await evaluator.stop()
+
+        assert captured["provider"] == "openrouter"
+        assert captured["model"] == "openai/gpt-6-luna"
+        assert captured["base_url"] == "https://openrouter.ai/api/v1"
+        assert captured["model_params"] == {"openai/gpt-6-luna": params}
 
 
 class TestInvalidAlertPatternIsNotRevalidated:

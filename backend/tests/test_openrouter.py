@@ -414,6 +414,34 @@ class TestSettings:
         assert "params" not in cached
 
     @pytest.mark.asyncio
+    async def test_switching_between_openai_compatible_at_openrouter_and_openrouter_keeps_each_key(self, client, fresh_server):
+        compat_key = "compat-test-" + "key-1"
+        res = await client.post("/api/settings", json={
+            "ai_provider": "openai_compatible",
+            "ai_providers_config": {"openai_compatible": {"ai_api_key": compat_key, "ai_base_url": OPENROUTER_URL, "ai_model": "meta/llama"}},
+        })
+        assert res.status_code == 200, res.text
+        res = await client.post("/api/settings", json={
+            "ai_provider": "openrouter",
+            "ai_providers_config": {"openrouter": {"ai_api_key": FAKE_KEY, "ai_model": "openai/gpt-6-luna"}},
+        })
+        assert res.status_code == 200, res.text
+        settings = (await client.get("/api/settings")).json()
+        assert settings["ai_provider"] == "openrouter" and settings["ai_model"] == "openai/gpt-6-luna"
+        res = await client.post("/api/settings", json={"ai_provider": "openai_compatible"})
+        assert res.status_code == 200, res.text
+
+        stored = _stored(fresh_server)
+        assert decrypt_value(stored["ai_api_key_openai_compatible"]) == compat_key
+        assert decrypt_value(stored["ai_api_key_openrouter"]) == FAKE_KEY
+        assert stored["ai_base_url_openai_compatible"] == OPENROUTER_URL
+        settings = (await client.get("/api/settings")).json()
+        assert settings["ai_provider"] == "openai_compatible"
+        assert settings["ai_base_url"] == OPENROUTER_URL and settings["ai_model"] == "meta/llama"
+        resolved = resolve_ai_provider_settings({k: v for k, v in stored.items() if not k.startswith("ai_api_key")})
+        assert resolved["base_url"] == OPENROUTER_URL and resolved["model_params"] is None
+
+    @pytest.mark.asyncio
     async def test_openrouter_without_a_key_asks_for_one(self, client):
         res = await client.get("/api/ai/models?provider=openrouter")
         assert res.status_code == 200

@@ -129,6 +129,52 @@ describe('SelectDropdown with a search box', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('makes the first match active after typing, not a pinned row above it, so Enter chooses the match', () => {
+    const onChange = vi.fn();
+    const withPlaceholder: SelectOption[] = [{ value: '', label: '-- Add Fallback Model --', pinned: true }, ...MODELS];
+    function Fallback() {
+      return <SelectDropdown variant="panel" label="Primary Model" options={withPlaceholder} value="" onChange={onChange} searchable />;
+    }
+    render(<Fallback />);
+    fireEvent.click(trigger());
+    type('claude');
+    expect(shownRows()).toEqual(['-- Add Fallback Model --', 'anthropic/claude-sonnet-5.5 [Reasoning]', 'Custom model name...']);
+    key('Enter');
+    expect(onChange).toHaveBeenCalledWith('anthropic/claude-sonnet-5.5');
+  });
+
+  it('with only pinned rows left, the first of them is active', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    fireEvent.click(trigger());
+    type('mistral');
+    expect(shownRows()).toEqual(['Custom model name...']);
+    key('Enter');
+    expect(onChange).toHaveBeenCalledWith('__custom__');
+  });
+
+  it('keeps focus in the search box when the popup around the list is pressed', () => {
+    render(<Harness />);
+    fireEvent.click(trigger());
+    const popup = search().closest('div[style]') as HTMLElement;
+    expect(fireEvent.mouseDown(popup)).toBe(false); // prevented: focus stays in the box
+    expect(fireEvent.mouseDown(search())).toBe(true);
+    expect(search()).toHaveFocus();
+    // The list itself (rows, scrollbar) takes presses as usual: it takes focus and its keys work
+    expect(fireEvent.mouseDown(screen.getByRole('listbox'))).toBe(true);
+    expect(fireEvent.mouseDown(screen.getAllByRole('option')[1])).toBe(true);
+  });
+
+  it('closes an empty list on Enter when it has no search box, as before', () => {
+    const onChange = vi.fn();
+    render(<SelectDropdown variant="panel" label="Primary Model" options={[]} value="" onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Primary Model/ }));
+    expect(screen.getByRole('listbox')).toHaveFocus();
+    key('Enter');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('has no search box without searchable, and the list takes focus as before', () => {
     render(<Harness searchable={false} />);
     fireEvent.click(trigger());

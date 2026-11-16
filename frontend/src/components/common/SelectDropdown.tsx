@@ -270,7 +270,8 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       case 'Enter':
       case ' ':
         e.preventDefault();
-        if (shown.length > 0) choose(activeIndex);
+        // An empty list closes, except while a search finds nothing, so the text can be changed
+        if (shown.length > 0 || !hasSearch) choose(activeIndex);
         return;
       case 'Tab':
         // Closes without choosing; focus is back on the trigger before the browser moves it on
@@ -394,6 +395,12 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       <div
         ref={popupRef}
         data-no-pull-refresh
+        // A press on the popup around the box and the list (its padding, the no-match note) keeps focus in
+        // the box, so the keys still work; the list itself, and its scrollbar, take presses as usual
+        onMouseDown={(e) => {
+          const target = e.target as Node;
+          if (target !== searchRef.current && !listRef.current?.contains(target)) e.preventDefault();
+        }}
         style={{
           position: 'fixed',
           top: panelPlacement?.top,
@@ -421,8 +428,11 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
             spellCheck={false}
             value={query}
             onChange={(e) => {
-              setQuery(e.target.value);
-              setActiveIndex(0);
+              const next = e.target.value;
+              setQuery(next);
+              // The first match is active, so Enter chooses it rather than a pinned row ("Custom model name...")
+              const rows = next.trim() ? options.filter((o) => optionMatchesSearch(o, next)) : options;
+              setActiveIndex(Math.max(0, rows.findIndex((o) => !o.pinned)));
             }}
             onKeyDown={handleListKeyDown}
             className="flex-1 min-w-0 bg-transparent text-xs text-fg placeholder:text-fg-subtle outline-hidden"

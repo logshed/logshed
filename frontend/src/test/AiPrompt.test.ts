@@ -129,6 +129,15 @@ describe('model rows', () => {
       '$0.075 in / $15 out per 1M tokens, 128K context',
     );
     expect(aiModelHint({ ...m, prompt_price: 0, completion_price: 0, context_length: 2000000 })).toBe('Free, 2M context');
+    // Three significant figures, so no price is cut to cents or rounded down to $0
+    expect(aiModelHint({ ...m, prompt_price: 0.125, completion_price: 0.0375, context_length: null })).toBe(
+      '$0.125 in / $0.0375 out per 1M tokens',
+    );
+    expect(aiModelHint({ ...m, prompt_price: 0.0004, completion_price: 1234.5, context_length: null })).toBe(
+      '<$0.001 in / $1230 out per 1M tokens',
+    );
+    // Free on one side only is a price, not Free
+    expect(aiModelHint({ ...m, prompt_price: 0, completion_price: 0.5, context_length: null })).toBe('$0 in / $0.5 out per 1M tokens');
   });
 
   it('leave out a price that is unknown or varies (a router) and say when a model is being retired', () => {

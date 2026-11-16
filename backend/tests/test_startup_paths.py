@@ -189,6 +189,19 @@ class TestModelRefreshWorker:
         fetch.assert_awaited_once_with("openai", api_key="sk-test-key", base_url="https://api.openai.com/v1")
         assert self._cache(startup_env, "openai") == self.MODELS
 
+    async def test_openrouter_is_refreshed_at_its_own_address_whatever_base_url_is_stored(self, startup_env):
+        _store_settings(startup_env, {
+            "ai_provider": ("openrouter", False),
+            "ai_api_key_openrouter": ("openrouter-test-" + "key", True),
+            "ai_base_url": ("http://ollama.lan:11434/v1", False),
+            "ai_base_url_openrouter": ("http://evil.example/v1", False),
+        })
+        fetch = AsyncMock(return_value=self.MODELS)
+
+        await self._run_one_cycle(startup_env, fetch)
+
+        fetch.assert_awaited_once_with("openrouter", api_key="openrouter-test-key", base_url="https://openrouter.ai/api/v1")
+
     async def test_a_provider_without_a_key_is_not_queried(self, startup_env):
         _store_settings(startup_env, {"ai_provider": ("gemini", False)})
         fetch = AsyncMock(return_value=self.MODELS)
