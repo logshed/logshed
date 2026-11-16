@@ -32,6 +32,7 @@ import { McpAccessCard } from './McpAccessCard.tsx';
 import { Badge } from '../common/Badge.tsx';
 import { Button } from '../common/Button.tsx';
 import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
+import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { Field, LABEL_CLASS, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
 import { Modal } from '../common/Modal.tsx';
@@ -67,11 +68,16 @@ const ModalError: React.FC<{ message: string }> = ({ message }) => (
 export interface ApiTokensTabProps {
   settings?: Partial<SystemSettings> | null;
   onSettingsSaved?: () => Promise<void> | void;
+  /** The MCP card's unsaved switch, for the Settings page's guards. */
+  onDirtyChange?: (dirty: boolean) => void;
+  saveTriggerRef?: React.MutableRefObject<(() => Promise<boolean>) | null>;
 }
 
 export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   settings,
   onSettingsSaved,
+  onDirtyChange,
+  saveTriggerRef,
 }) => {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const serverTimezone = settings?.server_timezone || undefined;
@@ -260,6 +266,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </code>
             </>
           }
+          note={<SaveModeNote mode="instant" />}
           actions={
             <Button variant="primary" onClick={handleOpenGenerateModal} icon={<Plus className="w-4 h-4" />}>
               Generate Token
@@ -420,7 +427,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
       </Card>
 
       {/* Model Context Protocol (MCP) Section */}
-      <McpAccessCard settings={settings} onSettingsSaved={onSettingsSaved} onGenerateToken={handleOpenGenerateModal} />
+      <McpAccessCard
+        settings={settings}
+        onSettingsSaved={onSettingsSaved}
+        onGenerateToken={handleOpenGenerateModal}
+        onDirtyChange={onDirtyChange}
+        saveTriggerRef={saveTriggerRef}
+      />
 
       {/* Generate Token Modal */}
       <Modal

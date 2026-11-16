@@ -5,7 +5,10 @@ import { sendDailyDigest } from '../../api/notifications.ts';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { Button } from '../common/Button.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
 import { CHECKBOX_CLASS, Field, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
+import { SaveModeNote } from '../common/SaveModeNote.tsx';
+import { FeedbackBanner, type Feedback } from './FeedbackBanner.tsx';
 
 export interface DailyDigestCardProps {
   settings: SystemSettings | null;
@@ -17,13 +20,11 @@ export interface DailyDigestCardProps {
   digestScheduleTime: string;
   onDigestScheduleTimeChange: (time: string) => void;
   isSavingSettings: boolean;
-  /** The result of Send Digest Now, shown in the notifications card's message (null clears it). */
-  onFeedback: (feedback: { text: string; isError: boolean } | null) => void;
 }
 
 /**
- * The daily digest part of the notifications card: on or off, its target and time (saved with the
- * settings form), the last run, and Send Digest Now.
+ * The Daily Digest card, below Notification Targets: on or off, its target and time (saved with the
+ * Save Changes bar), the last run, and Send Digest Now.
  */
 export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
   settings,
@@ -35,8 +36,8 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
   digestScheduleTime,
   onDigestScheduleTimeChange,
   isSavingSettings,
-  onFeedback,
 }) => {
+  const [feedback, onFeedback] = useState<Feedback | null>(null);
   const serverTimezone = settings?.server_timezone || undefined;
   const [scheduleTimeError, setScheduleTimeError] = useState<string | null>(null);
   const [digestLastRun, setDigestLastRun] = useState<string | null>(null);
@@ -95,29 +96,26 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
   };
 
   return (
-    <div className="pt-4 border-t border-line-subtle space-y-3">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h4 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-            <Calendar className="w-3.5 h-3.5 text-accent-500" />
-            <span>Daily Digest Rollup</span>
-          </h4>
-          <p className="text-xs text-fg-muted mt-0.5">
-            Automated 24-hour analytical summary covering log volume, top error sources, top logging services, and database storage delta.
-          </p>
-        </div>
+    <Card>
+      <CardHeader
+        icon={<Calendar />}
+        title="Daily Digest"
+        description="Automated 24-hour analytical summary covering log volume, top error sources, top logging services, and database storage delta."
+        note={<SaveModeNote mode="bar" />}
+        actions={
+          <Button
+            size="sm"
+            onClick={handleSendDigestNow}
+            disabled={isSendingDigest || isSavingSettings}
+            title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
+            icon={<Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />}
+          >
+            {isSendingDigest ? 'Sending...' : 'Send Digest Now'}
+          </Button>
+        }
+      />
 
-        <Button
-          size="sm"
-          onClick={handleSendDigestNow}
-          disabled={isSendingDigest || isSavingSettings}
-          className="self-start sm:self-auto"
-          title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
-          icon={<Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />}
-        >
-          {isSendingDigest ? 'Sending...' : 'Send Digest Now'}
-        </Button>
-      </div>
+      <FeedbackBanner feedback={feedback} onDismiss={() => onFeedback(null)} />
 
       <div className="p-3.5 bg-canvas/60 rounded-lg border border-line-subtle space-y-3">
         {/* Enable checkbox */}
@@ -209,6 +207,6 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 };

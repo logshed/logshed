@@ -22,9 +22,11 @@ import {
 import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { DailyDigestCard } from './DailyDigestCard.tsx';
+import { FeedbackBanner, type Feedback } from './FeedbackBanner.tsx';
 import { Badge } from '../common/Badge.tsx';
 import { Button, IconButton } from '../common/Button.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
+import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { Checkbox, LABEL_TEXT_CLASS, TextField } from '../common/Field.tsx';
 import { TableHead } from '../common/Table.tsx';
 
@@ -59,7 +61,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [channelToEdit, setChannelToEdit] = useState<NotificationChannel | null>(null);
   const [channelToDelete, setChannelToDelete] = useState<NotificationChannel | null>(null);
-  const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const [feedbackMsg, setFeedbackMsg] = useState<Feedback | null>(null);
 
   // Form states inside Add/Edit modal
   const [formName, setFormName] = useState<string>('');
@@ -226,6 +228,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   };
 
   return (
+    <>
     <Card>
       <CardHeader
         icon={<Bell />}
@@ -238,6 +241,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           </>
         }
         description="Dispatch real-time alerts across 80+ platforms (Discord, Gotify, Telegram, Ntfy, Pushover, Home Assistant, Slack, Email) using standard webhook URLs. Sensitive tokens are encrypted at rest."
+        note={<SaveModeNote mode="instant" />}
         actions={
           <Button
             size="sm"
@@ -250,26 +254,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
         }
       />
 
-      {/* Feedback Banner */}
-      {feedbackMsg && (
-        <div
-          className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${
-            feedbackMsg.isError
-              ? 'bg-danger-950/60 border-danger-800 text-danger-300'
-              : 'bg-success-950/60 border-success-800 text-success-300'
-          }`}
-        >
-          {feedbackMsg.isError ? (
-            <AlertTriangle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
-          ) : (
-            <CheckCircle2 className="w-4 h-4 text-success-400 shrink-0 mt-0.5" />
-          )}
-          <span className="flex-1">{feedbackMsg.text}</span>
-          <Button variant="ghost" size="sm" onClick={() => setFeedbackMsg(null)} className="-my-1">
-            Dismiss
-          </Button>
-        </div>
-      )}
+      <FeedbackBanner feedback={feedbackMsg} onDismiss={() => setFeedbackMsg(null)} />
 
       {/* Content Table */}
       <div className="overflow-x-auto rounded-lg border border-line-subtle">
@@ -348,20 +333,6 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             </table>
           )}
         </div>
-
-      {/* Daily Digest Section */}
-      <DailyDigestCard
-        settings={settings}
-        channels={channels}
-        digestEnabled={digestEnabled}
-        onDigestEnabledChange={onDigestEnabledChange}
-        digestChannelId={digestChannelId}
-        onDigestChannelIdChange={onDigestChannelIdChange}
-        digestScheduleTime={digestScheduleTime}
-        onDigestScheduleTimeChange={onDigestScheduleTimeChange}
-        isSavingSettings={isSavingSettings}
-        onFeedback={setFeedbackMsg}
-      />
 
       {/* Add / Edit Channel Modal */}
       <Modal
@@ -502,5 +473,19 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
         </p>
       </ConfirmDialog>
     </Card>
+
+    {/* The daily digest: its own card, saved with the Save Changes bar */}
+    <DailyDigestCard
+      settings={settings}
+      channels={channels}
+      digestEnabled={digestEnabled}
+      onDigestEnabledChange={onDigestEnabledChange}
+      digestChannelId={digestChannelId}
+      onDigestChannelIdChange={onDigestChannelIdChange}
+      digestScheduleTime={digestScheduleTime}
+      onDigestScheduleTimeChange={onDigestScheduleTimeChange}
+      isSavingSettings={isSavingSettings}
+    />
+    </>
   );
 };

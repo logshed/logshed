@@ -107,7 +107,7 @@ Connecting your AI assistant takes less than a minute:
 
 ### Step 1: Enable the MCP Server in LogShed
 1. Navigate to **Settings > API & MCP Access** in the LogShed web dashboard.
-2. Under the **Model Context Protocol (MCP)** card, turn on the master switch.
+2. Under the **Model Context Protocol (MCP)** card, tick **Enable Model Context Protocol**, then click **Save Changes** in the bar that appears.
 3. The card updates to **Active** and displays your instance's network SSE URL (for example, `http://192.168.1.50:8080/api/v1/mcp/sse`).
 
 ### Step 2: Generate an API Token

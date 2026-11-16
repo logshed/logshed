@@ -32,6 +32,8 @@ export interface CardHeaderProps {
   /** An icon element, sized and coloured here. */
   icon?: React.ReactElement<{ className?: string }>;
   description?: React.ReactNode;
+  /** A line under the description, such as how the card saves (`SaveModeNote`). */
+  note?: React.ReactNode;
   /** Buttons or a status at the right (under the title on a phone). */
   actions?: React.ReactNode;
   /** The heading level; h3 inside a page section. */
@@ -39,7 +41,7 @@ export interface CardHeaderProps {
   className?: string;
 }
 
-export const CardHeader: React.FC<CardHeaderProps> = ({ title, icon, description, actions, as: Heading = 'h3', className }) => {
+export const CardHeader: React.FC<CardHeaderProps> = ({ title, icon, description, note, actions, as: Heading = 'h3', className }) => {
   const text = (
     <div className="min-w-0">
       <Heading className={SECTION_TITLE_CLASS}>
@@ -47,6 +49,7 @@ export const CardHeader: React.FC<CardHeaderProps> = ({ title, icon, description
         <span>{title}</span>
       </Heading>
       {description && <p className="text-xs text-fg-muted mt-0.5">{description}</p>}
+      {note && <div className="mt-1">{note}</div>}
     </div>
   );
   if (!actions) return className ? <div className={className}>{text}</div> : text;

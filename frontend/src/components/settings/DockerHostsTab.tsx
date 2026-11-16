@@ -31,6 +31,7 @@ import { useAlias } from '../../context/AliasContext.tsx';
 import { Badge } from '../common/Badge.tsx';
 import { Button, IconButton } from '../common/Button.tsx';
 import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
+import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { TableHead } from '../common/Table.tsx';
 
 export interface DockerHostsTabProps {
@@ -195,6 +196,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({ initialAddHost }
             icon={<Box />}
             title="Docker Host Endpoints"
             description="Collect container logs across local Unix sockets, remote socket proxies, and mutual TLS daemons into a unified pipeline."
+            note={<SaveModeNote mode="instant" />}
             actions={
               <>
                 <Button

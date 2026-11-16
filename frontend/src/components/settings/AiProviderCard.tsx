@@ -9,6 +9,7 @@ import { ModelChainEditor } from '../ai/ModelChainEditor.tsx';
 import type { AiProviderConfig } from './useAiProviderConfig.ts';
 import { Button } from '../common/Button.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
+import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { CHECKBOX_CLASS, Field, LABEL_CLASS, SELECT_FIELD_CLASS, TextArea, TextField } from '../common/Field.tsx';
 
 // Base URLs of common servers that accept OpenAI-style requests. Ollama and LM Studio run on the
@@ -79,6 +80,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
         icon={<Brain />}
         title="On-Demand AI Provider Configuration"
         description="Fernet encryption secures API keys against exposure in database exports, disk clones, and backups."
+        note={<SaveModeNote mode="bar" />}
         actions={
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-success-950/60 border border-success-800 text-[11px] font-mono text-success-400">
             <Lock className="w-3 h-3 text-success-400" />

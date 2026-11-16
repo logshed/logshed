@@ -209,7 +209,7 @@ describe('NotificationsCard Component', () => {
     render(<DigestHarness settings={{ daily_digest_enabled: false, daily_digest_channel_id: null } as SystemSettings} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Daily Digest Rollup')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Daily Digest' })).toBeInTheDocument();
     });
 
     const checkbox = screen.getByLabelText(/Enable 24-hour daily digest rollup/i);

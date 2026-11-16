@@ -787,6 +787,69 @@ describe('SettingsPanel Component', () => {
       expect(advancedTab).not.toHaveAttribute('aria-current');
     });
 
+    // How each card says it saves: its heading's card holds one note
+    const saveModes = (): Record<string, string | null> => {
+      const out: Record<string, string | null> = {};
+      for (const heading of screen.getAllByRole('heading', { level: 3 })) {
+        const card = heading.closest('section');
+        if (!card || !heading.textContent) continue;
+        out[heading.textContent.trim()] = card.querySelector('[data-save-mode]')?.getAttribute('data-save-mode') ?? null;
+      }
+      return out;
+    };
+
+    it('every settings card says whether it waits for Save Changes or saves at once', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: true,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+      });
+      render(<SettingsPanel />);
+      await screen.findByText('Internal Application Logging');
+      await screen.findByRole('heading', { name: 'Daily Digest' });
+      expect(saveModes()).toMatchObject({
+        'Internal Application Logging': 'bar',
+        'On-Demand AI Provider Configuration': 'bar',
+        'Notification Targets0 targets': 'instant',
+        'Daily Digest': 'bar',
+        'Version Updates': 'bar',
+        'About LogShed': null,
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /^Sources$/i }));
+      await screen.findByText('Docker Host Endpoints');
+      expect(saveModes()).toMatchObject({ 'Syslog Host Aliases': 'instant', 'Docker Host Endpoints': 'instant' });
+
+      fireEvent.click(screen.getByRole('button', { name: /API & MCP Access/i }));
+      await screen.findByText('External API Access');
+      expect(saveModes()).toMatchObject({ 'External API Access': 'instant', 'Model Context Protocol (MCP)Disabled': 'bar' });
+
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced$/i }));
+      await screen.findByText('Advanced System Settings');
+      expect(saveModes()).toMatchObject({ 'Advanced System Settings': 'bar' });
+    });
+
+    it('asks before leaving the API & MCP tab with an unsaved MCP switch', async () => {
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      const onDirtyChange = vi.fn();
+      render(<SettingsPanel initialSubTab="tokens" onDirtyChange={onDirtyChange} />);
+      fireEvent.click(await screen.findByLabelText('Enable Model Context Protocol'));
+      await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced$/i }));
+      expect(await screen.findByText(/unsaved change to the MCP setting/i)).toBeInTheDocument();
+      expect(screen.queryByText('Advanced System Settings')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: /Discard & Leave/i }));
+      await screen.findByText('Advanced System Settings');
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
     it('initializes on given initialSubTab prop', async () => {
       render(<SettingsPanel initialSubTab="sources" />);
 
@@ -940,7 +1003,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByText('Daily Digest Rollup')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Daily Digest' })).toBeInTheDocument();
       });
 
       // No unsaved changes initially
@@ -1485,10 +1548,14 @@ describe('SettingsPanel Component', () => {
       expect(event.defaultPrevented).toBe(true);
 
       // A save made on this tab must not wipe the App tab edit
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({ ...mcpSettings, enable_mcp: true });
       fireEvent.click(screen.getByLabelText('Enable Model Context Protocol'));
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
       await waitFor(() => {
         expect(settingsApi.updateSettings).toHaveBeenCalledWith({ enable_mcp: true });
       });
+      // The badge shows the server's state once the save has been read back
+      await screen.findByText('Active');
 
       fireEvent.click(screen.getByRole('button', { name: /^Application$/i }));
       await waitFor(() => {

@@ -7,6 +7,7 @@ import {
   Server,
 } from 'lucide-react';
 import { Card, CardHeader } from '../common/Card.tsx';
+import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { Checkbox, Field, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
 import { StickySaveBar } from './StickySaveBar.tsx';
 import { AiThinkingLevel, SystemSettings } from '../../types.ts';
@@ -172,6 +173,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
         icon={<Sliders />}
         title="Advanced System Settings"
         description="Configure internal collector limits, network proxy subnets, and AI execution boundaries."
+        note={<SaveModeNote mode="bar" />}
       />
 
       <form onSubmit={handleSave} className="space-y-6">

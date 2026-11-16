@@ -11,6 +11,7 @@ import {
 import { Key } from '../common/icons.ts';
 import { Tabs } from '../common/Tabs.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
+import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { Checkbox, Field, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 import { VersionInfo, SettingsSubTab } from '../../types.ts';
 import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
@@ -98,6 +99,13 @@ const appFormValues = (s: SettingsResponseData): AppFormValues => ({
   daily_digest_schedule_time: s.daily_digest_schedule_time || '09:00',
 });
 
+// Sub-tabs with a form of their own (the Save Changes bar). They unmount when another sub-tab is
+// shown, so their unsaved edits are asked about first.
+const OWN_FORM_SUBTABS: Partial<Record<SettingsSubTab, string>> = {
+  tokens: 'You have an unsaved change to the MCP setting. Switching tabs now will discard it.',
+  advanced: 'You have unsaved changes in Advanced System Settings. Switching tabs now will discard those edits.',
+};
+
 const INTERNAL_LOG_LEVEL_OPTIONS: SelectOption[] = [
   { value: 'WARNING', label: 'WARNING (Default - warnings & errors)' },
   { value: 'ERROR', label: 'ERROR (Errors & critical failures only)' },
@@ -128,20 +136,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return pathToSettingsSubTab(window.location.pathname);
   });
 
-  // The Advanced tab unmounts when another sub-tab is shown, so its unsaved edits are guarded
-  // here. App tab edits live in this component and survive sub-tab switches.
-  const [advancedDirty, setAdvancedDirty] = useState<boolean>(false);
-  const advancedDirtyRef = useRef<boolean>(false);
-  const advancedSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  // The API & MCP and Advanced tabs unmount when another sub-tab is shown, so their unsaved edits
+  // are guarded here (OWN_FORM_SUBTABS). App tab edits live in this component and survive
+  // sub-tab switches.
+  const [subTabDirty, setSubTabDirty] = useState<boolean>(false);
+  const subTabDirtyRef = useRef<boolean>(false);
+  const subTabSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const [pendingSubTab, setPendingSubTab] = useState<SettingsSubTab | null>(null);
   const activeSubTabRef = useRef<SettingsSubTab>(activeSubTab);
   activeSubTabRef.current = activeSubTab;
 
   const commitSubTabChange = (nextSubTab: SettingsSubTab) => {
     setActiveSubTab(nextSubTab);
-    if (nextSubTab !== 'advanced') {
-      advancedDirtyRef.current = false;
-      setAdvancedDirty(false);
+    if (nextSubTab !== activeSubTabRef.current) {
+      subTabDirtyRef.current = false;
+      setSubTabDirty(false);
     }
     const targetPath = settingsSubTabToPath(nextSubTab);
     if (window.location.pathname !== targetPath) {
@@ -150,16 +159,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handleSubTabChange = (nextSubTab: SettingsSubTab) => {
-    if (activeSubTab === 'advanced' && nextSubTab !== 'advanced' && advancedDirtyRef.current) {
+    if (nextSubTab !== activeSubTab && subTabDirtyRef.current) {
       setPendingSubTab(nextSubTab);
       return;
     }
     commitSubTabChange(nextSubTab);
   };
 
-  const handleAdvancedDirtyChange = useCallback((dirty: boolean) => {
-    advancedDirtyRef.current = dirty;
-    setAdvancedDirty(dirty);
+  const handleSubTabDirtyChange = useCallback((dirty: boolean) => {
+    subTabDirtyRef.current = dirty;
+    setSubTabDirty(dirty);
   }, []);
 
   // Form states
@@ -273,20 +282,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   useEffect(() => {
     const handlePopState = () => {
       const nextSubTab = pathToSettingsSubTab(window.location.pathname);
-      if (
-        activeSubTabRef.current === 'advanced' &&
-        nextSubTab !== 'advanced' &&
-        advancedDirtyRef.current
-      ) {
-        // Stay on the Advanced tab and ask first, like a click on another sub-tab would.
-        window.history.pushState(null, '', settingsSubTabToPath('advanced'));
+      const shown = activeSubTabRef.current;
+      if (nextSubTab !== shown && subTabDirtyRef.current) {
+        // Stay on the shown tab and ask first, like a click on another sub-tab would.
+        window.history.pushState(null, '', settingsSubTabToPath(shown));
         setPendingSubTab(nextSubTab);
         return;
       }
       setActiveSubTab(nextSubTab);
-      if (nextSubTab !== 'advanced') {
-        advancedDirtyRef.current = false;
-        setAdvancedDirty(false);
+      if (nextSubTab !== shown) {
+        subTabDirtyRef.current = false;
+        setSubTabDirty(false);
       }
     };
     window.addEventListener('popstate', handlePopState);
@@ -301,8 +307,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, []);
 
   // Notify the parent of unsaved edits on any sub-tab: the Application tab form stays alive while
-  // other sub-tabs are shown, and the Advanced tab reports its own edits.
-  const hasUnsavedChanges = isDirty || (activeSubTab === 'advanced' && advancedDirty);
+  // other sub-tabs are shown, and the API & MCP and Advanced tabs report their own edits.
+  const hasUnsavedChanges = isDirty || (OWN_FORM_SUBTABS[activeSubTab] !== undefined && subTabDirty);
   useEffect(() => {
     onDirtyChange?.(hasUnsavedChanges);
   }, [hasUnsavedChanges, onDirtyChange]);
@@ -395,15 +401,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     await executeSave();
   };
 
-  // Saves every set of unsaved edits (Application tab form and the Advanced tab card).
+  // Saves every set of unsaved edits (Application tab form and the shown API & MCP or Advanced tab).
   // Resolves false as soon as one save fails so the caller does not leave the page.
   const saveAllChanges = async (): Promise<boolean> => {
     if (isDirtyRef.current) {
       const appSaved = await executeSave();
       if (!appSaved) return false;
     }
-    if (advancedDirtyRef.current && advancedSaveRef.current) {
-      return advancedSaveRef.current();
+    if (subTabDirtyRef.current && subTabSaveRef.current) {
+      return subTabSaveRef.current();
     }
     return true;
   };
@@ -472,6 +478,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             icon={<FileText />}
             title="Internal Application Logging"
             description="Configure minimum severity level for LogShed operational diagnostics captured into its database and stream."
+            note={<SaveModeNote mode="bar" />}
             actions={
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-canvas border border-line-subtle text-[11px] font-mono text-fg-muted">
                 <span>Source: <code className="text-accent-400">logshed</code></span>
@@ -524,6 +531,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             icon={<ArrowUpCircle />}
             title="Version Updates"
             description="Periodically check GitHub Container Registry for new stable releases and display notification badges"
+            note={<SaveModeNote mode="bar" />}
           />
 
           <div className="pt-1">
@@ -567,6 +575,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <ApiTokensTab
           settings={settings}
           onSettingsSaved={refreshBaseline}
+          onDirtyChange={handleSubTabDirtyChange}
+          saveTriggerRef={subTabSaveRef}
         />
       )}
 
@@ -577,8 +587,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <AdvancedSettingsCard
             settings={settings}
             onSettingsSaved={refreshBaseline}
-            onDirtyChange={handleAdvancedDirtyChange}
-            saveTriggerRef={advancedSaveRef}
+            onDirtyChange={handleSubTabDirtyChange}
+            saveTriggerRef={subTabSaveRef}
           />
 
           {/* Admin Password Reset Section */}
@@ -586,7 +596,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       )}
 
-      {/* Unsaved Advanced edits: asked before another sub-tab replaces the Advanced tab */}
+      {/* Unsaved edits on the API & MCP or Advanced tab: asked before another sub-tab replaces it */}
       <UnsavedChangesModal
         isOpen={pendingSubTab !== null}
         onKeepEditing={() => setPendingSubTab(null)}
@@ -596,14 +606,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           if (target) commitSubTabChange(target);
         }}
         onSave={async () => {
-          const saved = advancedSaveRef.current ? await advancedSaveRef.current() : true;
+          const saved = subTabSaveRef.current ? await subTabSaveRef.current() : true;
           if (saved) {
             const target = pendingSubTab;
             setPendingSubTab(null);
             if (target) commitSubTabChange(target);
           }
         }}
-        message="You have unsaved changes in Advanced System Settings. Switching tabs now will discard those edits."
+        message={OWN_FORM_SUBTABS[activeSubTab] ?? ''}
         discardLabel="Discard & Leave"
         zIndex="z-50"
       />

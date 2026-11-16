@@ -390,7 +390,7 @@ describe('ApiTokensTab Component', () => {
     expect(screen.queryByText((content) => content.includes('"command": "mcp-proxy"'))).not.toBeInTheDocument();
   });
 
-  it('toggles MCP setting on and calls updateSettings and onSettingsSaved', async () => {
+  it('the MCP switch waits for Save Changes, then calls updateSettings and onSettingsSaved', async () => {
     vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
     const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
     const onSaved = vi.fn();
@@ -410,11 +410,33 @@ describe('ApiTokensTab Component', () => {
     expect(mcpToggle).not.toBeChecked();
 
     fireEvent.click(mcpToggle);
+    // Nothing is saved yet: the card waits for the Save Changes bar
+    expect(mcpToggle).toBeChecked();
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Disabled')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
     await waitFor(() => {
       expect(updateSpy).toHaveBeenCalledWith({ enable_mcp: true });
       expect(onSaved).toHaveBeenCalled();
     });
+  });
+
+  it('Discard puts the MCP switch back and saves nothing', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+    const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+    const onDirtyChange = vi.fn();
+    render(<ApiTokensTab settings={{ enable_mcp: true }} onDirtyChange={onDirtyChange} />);
+
+    const mcpToggle = await screen.findByLabelText(/Enable Model Context Protocol/i);
+    fireEvent.click(mcpToggle);
+    expect(mcpToggle).not.toBeChecked();
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Discard$/i }));
+    expect(mcpToggle).toBeChecked();
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+    expect(updateSpy).not.toHaveBeenCalled();
   });
 
   it('opens generate token modal when clicking Generate API Token in MCP helper', async () => {
