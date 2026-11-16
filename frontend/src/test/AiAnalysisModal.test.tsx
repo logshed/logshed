@@ -901,6 +901,23 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     });
   });
 
+  it('shows the missing key and model list notices in the interface font, not monospace', async () => {
+    vi.spyOn(aiApi, 'getAiModels').mockImplementation(async (provider) =>
+      provider === 'openai'
+        ? { provider: 'openai', models: [], has_api_key: false, cached_at: null, is_live: false }
+        : { provider: provider ?? 'gemini', models: [], has_api_key: true, cached_at: null, is_live: false, error: 'The provider did not answer.' }
+    );
+    render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+    await screen.findByPlaceholderText('Redacted prompt...');
+    fireEvent.click(screen.getByRole('button', { name: /Model & Provider Settings/i }));
+
+    const error = await screen.findByText('The provider did not answer.');
+    expect(error.closest('.font-mono')).toBeNull();
+    chooseOption(modelDropdown('AI Provider'), 'OpenAI');
+    const missing = await screen.findByText(/No API key configured for OpenAI/);
+    expect(missing.closest('.font-mono')).toBeNull();
+  });
+
   it('switching to OpenRouter takes its saved model and key from the settings', async () => {
     vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
       ai_provider: 'gemini',

@@ -70,6 +70,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **AI notices in the interface font**: The "API Key Required to Discover Models" and model list error boxes in Settings and the AI analysis dialog, the "Keys encrypted at rest" label and the empty fallback list note were in monospace; they now use the interface font, as other notices do. Model names stay in monospace.
 - **OpenAI-Compatible base URL note is easier to read**: The line under the base URL in Settings ("Any server that accepts OpenAI-style requests works...") was too faint to read comfortably (contrast 4.0:1); it now has the contrast of other help text.
 - **Settings saves only what you changed**: Save Changes on Settings > Application sent every field on the tab, so a setting changed in another browser tab or by someone else since the page loaded was set back to the old value. Now only the fields you edited are sent, and after the save the other fields show the latest saved values.
 - **Storage trend chart on the server's clock**: The 30-day trend chart on the Storage page labelled its time axis and tooltip in the browser's time zone, so for a browser in another zone than the server its times disagreed with the rest of the page and its ticks sat at the browser's midnight. It now uses the server's time zone, as every other time in the web interface does.

@@ -81,7 +81,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
         description="Fernet encryption secures API keys against exposure in database exports, disk clones, and backups."
         note={<SaveModeNote mode="bar" />}
         actions={
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-success-950/60 border border-success-800 text-[11px] font-mono text-success-400">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-success-950/60 border border-success-800 text-[11px] text-success-400">
             <Lock className="w-3 h-3 text-success-400" />
             <span>Keys encrypted at rest</span>
           </div>
@@ -199,7 +199,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
 
         {/* API Key Missing Notice */}
         {!hasApiKeyForProvider && providerNeedsApiKey(aiProvider) && (
-          <div className="sm:col-span-2 p-3 bg-warning-950/40 border border-warning-800/60 rounded-lg flex items-start justify-between gap-3 text-warning-300 text-xs font-mono">
+          <div className="sm:col-span-2 p-3 bg-warning-950/40 border border-warning-800/60 rounded-lg flex items-start justify-between gap-3 text-warning-300 text-xs">
             <div className="flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
               <div>
@@ -222,7 +222,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
 
         {/* Models Error Banner */}
         {modelsError && (hasApiKeyForProvider || !providerNeedsApiKey(aiProvider)) && (
-          <div className="sm:col-span-2 p-2.5 bg-canvas border border-line rounded-lg flex items-center justify-between text-xs font-mono text-fg-muted">
+          <div className="sm:col-span-2 p-2.5 bg-canvas border border-line rounded-lg flex items-center justify-between text-xs text-fg-muted">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-3.5 h-3.5 text-warning-400 shrink-0" />
               <span className="text-[11px] text-warning-300/90">{modelsError}</span>

@@ -723,7 +723,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               >
                 {/* Missing API Key Warning */}
                 {!hasApiKeyForProvider && providerNeedsApiKey(provider) && (
-                  <div className="p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex items-start gap-2 text-warning-300 text-xs font-mono">
+                  <div className="p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex items-start gap-2 text-warning-300 text-xs">
                     <AlertCircle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
                     <span>
                       No API key configured for {getAiProvider(provider)?.label ?? 'your endpoint'}. Please configure your API key in Settings to load models and run AI analysis.
@@ -733,7 +733,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 {/* Models Loading Error Notice */}
                 {modelsError && (hasApiKeyForProvider || !providerNeedsApiKey(provider)) && (
-                  <div className="p-2.5 bg-danger-950/40 border border-danger-800/60 rounded-lg flex items-start gap-2 text-danger-300 text-xs font-mono">
+                  <div className="p-2.5 bg-danger-950/40 border border-danger-800/60 rounded-lg flex items-start gap-2 text-danger-300 text-xs">
                     <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
                     <span>{modelsError}</span>
                   </div>

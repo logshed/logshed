@@ -8,7 +8,7 @@ import { SelectDropdown } from '../common/SelectDropdown.tsx';
 const SIZES = {
   roomy: {
     wrapper: 'space-y-2',
-    empty: 'p-3 bg-canvas border border-line-subtle rounded-lg text-[11px] text-fg-muted font-mono',
+    empty: 'p-3 bg-canvas border border-line-subtle rounded-lg text-[11px] text-fg-muted',
     list: 'space-y-1.5 max-h-48 overflow-y-auto',
     row: 'p-2',
     rowButton: 'p-1',
@@ -19,7 +19,7 @@ const SIZES = {
   },
   compact: {
     wrapper: 'space-y-1.5',
-    empty: 'p-2 bg-canvas border border-line-subtle rounded-sm text-[11px] text-fg-muted font-mono',
+    empty: 'p-2 bg-canvas border border-line-subtle rounded-sm text-[11px] text-fg-muted',
     list: 'space-y-1 max-h-36 overflow-y-auto',
     row: 'p-1.5',
     rowButton: 'p-0.5',

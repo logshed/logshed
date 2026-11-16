@@ -344,6 +344,40 @@ describe('SettingsPanel Component', () => {
     ]);
   });
 
+  it('shows the AI notices and the encryption label in the interface font, not monospace', async () => {
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+      ai_provider: 'openrouter',
+      ai_model: 'google/gemini-3.7-flash',
+      ai_api_key: '',
+      ai_base_url: null,
+      ai_enabled: true,
+      retention_days: 14,
+      max_retention_days: 30,
+      has_ai_api_key: false,
+    });
+    vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+      provider: 'openrouter', models: [], has_api_key: false, cached_at: null, is_live: false,
+      error: 'No API key configured for OpenRouter.',
+    });
+    render(<SettingsPanel />);
+
+    const notice = await screen.findByText(/API Key Required to Discover Models/);
+    expect(notice.closest('.font-mono')).toBeNull();
+    expect(screen.getByText('Keys encrypted at rest').closest('.font-mono')).toBeNull();
+    expect(screen.getByText(/No fallback models configured/).closest('.font-mono')).toBeNull();
+  });
+
+  it('shows a model list error in the interface font, not monospace', async () => {
+    vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+      provider: 'gemini', models: [], has_api_key: true, cached_at: null, is_live: false,
+      error: 'The provider did not answer.',
+    });
+    render(<SettingsPanel />);
+
+    const error = await screen.findByText('The provider did not answer.');
+    expect(error.closest('.font-mono')).toBeNull();
+  });
+
   it('renders "Keys encrypted at rest" badge, card title, and explanatory Fernet caption', async () => {
     render(<SettingsPanel />);
 
