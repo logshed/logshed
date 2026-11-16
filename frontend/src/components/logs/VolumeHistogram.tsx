@@ -101,6 +101,19 @@ const TAP_SLOP_PX = 10;
 
 const CHART_MARGIN = { top: 4, right: 4, left: 0, bottom: 0 };
 
+/**
+ * Where the pinned box goes for a bar at fraction x of the chart's width: its left edge (a bar on
+ * the left half) or right edge (the right half) about half a box (6rem) before the bar, and never
+ * nearer the band's sides than their 0.75rem padding.
+ */
+function pinnedBoxPosition(x: number): React.CSSProperties {
+  const fraction = Math.min(1, Math.max(0, x));
+  const bar = `(0.75rem + (100% - 1.5rem) * ${fraction})`;
+  return fraction <= 0.5
+    ? { left: `max(0.75rem, calc(${bar} - 6rem))` }
+    : { right: `max(0.75rem, calc(100% - ${bar} - 6rem))` };
+}
+
 /** Only the parts of the filters the counts depend on, as a key that changes when they do. */
 const filterKey = (f: LogFilterParams) =>
   JSON.stringify([f.query ?? '', f.severity_max ?? null, f.sources ?? f.source ?? [], f.apps ?? f.app_name ?? [], f.from ?? '', f.to ?? '']);
@@ -345,10 +358,11 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
       </div>
       {pinned && !stale && (
         // Below the chart (over the top of the log list), under its bar, so the bars stay in view and
-        // another can be tapped; its centre follows the bar but stays inside the band
+        // another can be tapped. Anchored by the edge nearer its bar, never past the band's padding:
+        // centred with a shift of half its width, a box for a bar near the left ran off the screen
         <div
-          className="absolute top-full z-20 mt-1 -translate-x-1/2"
-          style={{ left: `calc(0.75rem + (100% - 1.5rem) * ${Math.min(0.85, Math.max(0.15, (pinned.mid - domain[0]) / (domain[1] - domain[0])))})` }}
+          className="absolute top-full z-20 mt-1 max-w-[calc(100%-1.5rem)]"
+          style={pinnedBoxPosition((pinned.mid - domain[0]) / (domain[1] - domain[0]))}
         >
           {canZoom ? (
             <button type="button" className="block cursor-pointer" onClick={() => zoomTo(pinned)}>
