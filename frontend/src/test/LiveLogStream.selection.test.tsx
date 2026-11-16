@@ -2,7 +2,7 @@
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { LiveLogStream } from '../components/logs/LiveLogStream.tsx';
-import { DESKTOP_LOG_ROW_HEIGHT } from '../components/logs/LogRow.tsx';
+import { DESKTOP_LOG_ROW_HEIGHT, LOG_GRID_COLS_WITH_AI, LOG_GRID_COLS_WITHOUT_AI } from '../components/logs/LogRow.tsx';
 import * as settingsApi from '../api/settings.ts';
 import * as logDetailModalModule from '../components/logs/LogDetailModal.tsx';
 import * as logsApi from '../api/logs.ts';
@@ -468,7 +468,7 @@ describe('Console selection, AI and drawer controls', () => {
       expect(screen.queryAllByTitle('Explain with AI')).toHaveLength(0);
       const header = screen.getByTestId('log-table-header');
       expect(within(header).queryByText('ACTIONS')).toBeNull();
-      expect(header.className).toContain('grid-cols-[36px_120px_65px_130px_130px_1fr]');
+      expect(header.className).toContain(LOG_GRID_COLS_WITHOUT_AI);
       expect(header.className).not.toContain('_60px]');
 
       fireEvent.click(document.querySelectorAll('.log-row')[0].firstElementChild as HTMLElement);
@@ -486,7 +486,7 @@ describe('Console selection, AI and drawer controls', () => {
       await waitFor(() => expect(screen.getAllByTitle('Explain with AI').length).toBe(sampleLogs.length));
       const header = screen.getByTestId('log-table-header');
       expect(within(header).getByText('ACTIONS')).toBeInTheDocument();
-      expect(header.className).toContain('grid-cols-[36px_120px_65px_130px_130px_1fr_60px]');
+      expect(header.className).toContain(LOG_GRID_COLS_WITH_AI);
 
       fireEvent.click(document.querySelectorAll('.log-row')[0].firstElementChild as HTMLElement);
       fireEvent.click(await screen.findByRole('button', { name: 'Run Analysis (1)' }));

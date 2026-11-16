@@ -8,10 +8,14 @@ import type { ProcessedLogEntry } from '../../utils/logEntry.ts';
 
 export type { ProcessedLogEntry };
 
-// Desktop column layout, shared by the table header and every row so they stay aligned.
+// Desktop column layout, shared by the table header and every row so they stay aligned. The time,
+// host and app widths are CSS variables the Console sets on the box around them (useColumnWidths),
+// so resizing a column restyles that box and no row; the fallbacks are the default widths.
 // Without AI the last (row actions) column is dropped.
-export const LOG_GRID_COLS_WITH_AI = 'grid-cols-[36px_120px_65px_130px_130px_1fr_60px]';
-export const LOG_GRID_COLS_WITHOUT_AI = 'grid-cols-[36px_120px_65px_130px_130px_1fr]';
+export const LOG_GRID_COLS_WITH_AI =
+  'grid-cols-[36px_var(--col-time,120px)_65px_var(--col-host,130px)_var(--col-app,130px)_1fr_60px]';
+export const LOG_GRID_COLS_WITHOUT_AI =
+  'grid-cols-[36px_var(--col-time,120px)_65px_var(--col-host,130px)_var(--col-app,130px)_1fr]';
 
 export function logGridCols(aiEnabled: boolean): string {
   return aiEnabled ? LOG_GRID_COLS_WITH_AI : LOG_GRID_COLS_WITHOUT_AI;

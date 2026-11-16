@@ -48,6 +48,9 @@ import { StreamToolbar } from './StreamToolbar.tsx';
 import { SelectionActionBar } from './SelectionActionBar.tsx';
 import { DeleteSelectedDialog } from './DeleteSelectedDialog.tsx';
 import { DownloadLogsDialog, DownloadScope } from './DownloadLogsDialog.tsx';
+import { ColumnResizeHandle } from './ColumnResizeHandle.tsx';
+import { ResizableColumn, useColumnWidths } from './useColumnWidths.ts';
+import { Button } from '../common/Button.tsx';
 import { ConsoleEmptyKind, ConsoleEmptyState } from './ConsoleEmptyState.tsx';
 import { StreamLoadNote } from './StreamLoadNote.tsx';
 import { useSkippedNote } from './useSkippedNote.ts';
@@ -121,6 +124,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
   // Off until settings load, so users who never turned AI on do not see AI buttons flash in
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
+  // Desktop column widths: CSS variables on the table box, remembered by this browser
+  const tableRef = useRef<HTMLDivElement>(null);
+  const columns = useColumnWidths(tableRef, aiEnabled);
   // The listening port from settings, for the first-run card; undefined until settings load
   const [syslogPort, setSyslogPort] = useState<number | undefined>(undefined);
   // Whether the database holds any logs: null until the facets arrive, true once any log is seen.
@@ -606,6 +612,25 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       ? 'first-run'
       : 'waiting';
 
+  // A desktop heading whose right edge drags to resize its column
+  const resizableHeading = (col: ResizableColumn, heading: string, name: string) => {
+    const { min, max } = columns.bounds(col);
+    return (
+      <div className="relative self-stretch flex items-center min-w-0 pr-2">
+        <span className="truncate">{heading}</span>
+        <ColumnResizeHandle
+          label={name}
+          width={columns.widths[col]}
+          min={min}
+          max={max}
+          onPreview={(px) => columns.preview(col, px)}
+          onCommit={(px) => columns.commit(col, px)}
+          onReset={() => columns.reset(col)}
+        />
+      </div>
+    );
+  };
+
   const streamToolbar = (
     <StreamToolbar
       isMobile={isMobile}
@@ -664,11 +689,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         )}
       </div>
 
-      {/* Virtualized Table View */}
-      <div className="flex-1 relative overflow-hidden flex flex-col">
+      {/* Virtualized Table View; its style holds the resizable column widths the header and rows share */}
+      <div ref={tableRef} style={columns.styleVars} className="flex-1 relative overflow-hidden flex flex-col">
         {/* Table Header (Desktop only) */}
         {!isMobile && (
           <div
+            ref={columns.headerRef}
             data-testid="log-table-header"
             className={`grid bg-canvas border-b border-line border-l-2 border-l-transparent text-fg-muted text-[11px] font-mono font-semibold ${logGridCols(aiEnabled)} px-3 py-1.5 select-none items-center`}
           >
@@ -687,11 +713,18 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                 )}
               </button>
             </div>
-            <div>TIMESTAMP</div>
+            {resizableHeading('time', 'TIMESTAMP', 'Timestamp')}
             <div>SEV</div>
-            <div>HOST / IP</div>
-            <div>APP / CONTAINER</div>
-            <div>MESSAGE</div>
+            {resizableHeading('host', 'HOST / IP', 'Host')}
+            {resizableHeading('app', 'APP / CONTAINER', 'App')}
+            <div className="flex min-w-0 items-center justify-between gap-2 pl-2">
+              <span>MESSAGE</span>
+              {columns.changed && (
+                <Button variant="ghost" size="sm" className="-my-1" onClick={() => columns.reset()}>
+                  Reset widths
+                </Button>
+              )}
+            </div>
             {aiEnabled && <div className="text-right pr-2">ACTIONS</div>}
           </div>
         )}
