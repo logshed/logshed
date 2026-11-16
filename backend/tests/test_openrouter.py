@@ -144,6 +144,7 @@ class TestModelList:
                 "reasoning_mandatory": True,
                 "reasoning_efforts": ["high", "medium", "low"],
                 "takes_temperature": True,
+                "max_completion_tokens": 65536,
             },
         }
 
@@ -264,11 +265,27 @@ class TestReasoning:
 
     def test_a_model_not_in_the_list_gets_the_level_or_nothing_when_off(self):
         on = ai_engine._openai_sampling_kwargs("typed/by-hand", "high", {})
-        assert on == {"extra_body": {"reasoning": {"effort": "high"}}}
+        assert on == {"max_tokens": 16000, "extra_body": {"reasoning": {"effort": "high"}}}
         off = ai_engine._openai_sampling_kwargs("typed/by-hand", "off", {})
-        assert off == {"temperature": 0.2}
+        assert off == {"max_tokens": 16000, "temperature": 0.2}
         # A name that looks like an OpenAI reasoning model gets no temperature
-        assert ai_engine._openai_sampling_kwargs("openai/gpt-6-luna", "off", {}) == {}
+        assert ai_engine._openai_sampling_kwargs("openai/gpt-6-luna", "off", {}) == {"max_tokens": 16000}
+
+    def test_answers_are_limited_to_16000_tokens_or_the_models_own_lower_limit(self):
+        def limit(model_limit):
+            params = {**CHAT, "max_completion_tokens": model_limit}
+            return ai_engine._openai_sampling_kwargs("m", "low", {"m": params})["max_tokens"]
+        assert limit(65536) == 16000
+        assert limit(4096) == 4096
+        assert limit(None) == 16000
+        assert limit(0) == 16000
+        # Read from the model list
+        entry = ai_engine.openrouter_model_entry(_raw("openai/gpt-5.2-chat"))
+        assert entry["params"]["max_completion_tokens"] == _raw("openai/gpt-5.2-chat")["top_provider"]["max_completion_tokens"]
+
+    def test_other_providers_send_no_answer_limit(self):
+        assert "max_tokens" not in ai_engine._openai_sampling_kwargs("gpt-6.1-sol", "high")
+        assert "max_tokens" not in ai_engine._openai_sampling_kwargs("llama3.2", "off")
 
     def test_other_openai_sdk_providers_keep_reasoning_effort(self):
         kwargs = ai_engine._openai_sampling_kwargs("gpt-6.1-sol", "high")
@@ -324,6 +341,7 @@ class TestReasoning:
             )
         sent = inst.chat.completions.create.call_args.kwargs
         assert sent["extra_body"] == {"reasoning": {"effort": "none"}}
+        assert sent["max_tokens"] == 16000
         assert "reasoning_effort" not in sent and "temperature" not in sent
         assert mock_cls.call_args.kwargs["default_headers"] == ai_engine.OPENROUTER_ATTRIBUTION_HEADERS
 

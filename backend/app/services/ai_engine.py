@@ -189,6 +189,10 @@ def openai_model_takes_temperature(model_name: str) -> bool:
 
 # OpenRouter's reasoning efforts, lowest first
 _OPENROUTER_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+# The longest answer (reasoning included) asked of an OpenRouter model, or its own lower limit. Without
+# a limit OpenRouter reserves the model's longest possible answer (65,536 tokens and more) against the
+# key's credit and refuses a request a low-credit key cannot cover (402).
+OPENROUTER_MAX_TOKENS = 16_000
 
 
 def _openrouter_effort(level: str, params: dict[str, Any]) -> Optional[str]:
@@ -217,15 +221,20 @@ def _openrouter_sampling_kwargs(
     model: str, thinking_level: Optional[str], params: Optional[dict[str, Any]]
 ) -> dict[str, Any]:
     """
-    The reasoning and temperature for an OpenRouter request, from what its model list says the model
-    accepts. A model not in the list (typed by hand) gets the thinking level as its effort, or no
+    The answer limit, reasoning and temperature for an OpenRouter request, from what its model list
+    says the model accepts. A model not in the list (typed by hand) gets the thinking level as its effort, or no
     reasoning setting when off, and a temperature only when it is not reasoning and looks like it takes one.
     """
     level = _thinking_level(thinking_level)
     if params is None:
         params = {"supports_reasoning": level != "off", "takes_temperature": openai_model_takes_temperature(model)}
     effort = _openrouter_effort(level, params)
-    kwargs: dict[str, Any] = {}
+    model_limit = params.get("max_completion_tokens")
+    kwargs: dict[str, Any] = {
+        "max_tokens": min(OPENROUTER_MAX_TOKENS, model_limit)
+        if isinstance(model_limit, int) and model_limit > 0
+        else OPENROUTER_MAX_TOKENS
+    }
     if effort is not None:
         kwargs["extra_body"] = {"reasoning": {"effort": effort}}
     # A reasoning model takes no temperature from LogShed, as on OpenAI
@@ -652,6 +661,7 @@ def openrouter_model_entry(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
     reasoning = raw.get("reasoning") or {}
     pricing = raw.get("pricing") or {}
     context_length = raw.get("context_length")
+    max_completion = (raw.get("top_provider") or {}).get("max_completion_tokens")
     return {
         "id": model_id,
         "name": raw.get("name") or model_id,
@@ -666,6 +676,7 @@ def openrouter_model_entry(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
             "reasoning_mandatory": bool(reasoning.get("mandatory")),
             "reasoning_efforts": [e for e in reasoning.get("supported_efforts") or [] if e in _OPENROUTER_EFFORTS] or None,
             "takes_temperature": "temperature" in supported,
+            "max_completion_tokens": max_completion if isinstance(max_completion, int) and max_completion > 0 else None,
         },
     }
 

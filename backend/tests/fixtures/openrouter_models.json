@@ -61,6 +61,11 @@
      "low"
     ],
     "default_effort": "medium"
+   },
+   "top_provider": {
+    "context_length": 1048576,
+    "max_completion_tokens": 65536,
+    "is_moderated": false
    }
   },
   {
@@ -119,6 +124,11 @@
      "low"
     ],
     "default_effort": "medium"
+   },
+   "top_provider": {
+    "context_length": 1048576,
+    "max_completion_tokens": 65536,
+    "is_moderated": false
    }
   },
   {
@@ -178,7 +188,12 @@
     "/api/v1/messages",
     "/api/v1/responses"
    ],
-   "reasoning": null
+   "reasoning": null,
+   "top_provider": {
+    "context_length": null,
+    "max_completion_tokens": null,
+    "is_moderated": false
+   }
   },
   {
    "id": "openai/gpt-5.2-chat",
@@ -220,7 +235,12 @@
     "/api/v1/messages",
     "/api/v1/responses"
    ],
-   "reasoning": null
+   "reasoning": null,
+   "top_provider": {
+    "context_length": 128000,
+    "max_completion_tokens": 32000,
+    "is_moderated": false
+   }
   },
   {
    "id": "z-ai/glm-5.1",
@@ -274,6 +294,11 @@
    "reasoning": {
     "mandatory": false,
     "default_enabled": true
+   },
+   "top_provider": {
+    "context_length": 202752,
+    "max_completion_tokens": 182476,
+    "is_moderated": false
    }
   },
   {
@@ -342,6 +367,11 @@
      "none"
     ],
     "default_effort": "medium"
+   },
+   "top_provider": {
+    "context_length": 1050000,
+    "max_completion_tokens": 128000,
+    "is_moderated": true
    }
   },
   {
@@ -400,6 +430,11 @@
      "low"
     ],
     "default_effort": "high"
+   },
+   "top_provider": {
+    "context_length": 1000000,
+    "max_completion_tokens": 128000,
+    "is_moderated": true
    }
   },
   {
@@ -449,6 +484,11 @@
    "reasoning": {
     "mandatory": false,
     "default_enabled": true
+   },
+   "top_provider": {
+    "context_length": 1048576,
+    "max_completion_tokens": 262144,
+    "is_moderated": false
    }
   },
   {
@@ -505,6 +545,11 @@
      "none"
     ],
     "default_effort": "minimal"
+   },
+   "top_provider": {
+    "context_length": 65536,
+    "max_completion_tokens": 58982,
+    "is_moderated": false
    }
   }
  ]

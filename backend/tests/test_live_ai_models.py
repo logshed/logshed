@@ -273,6 +273,8 @@ async def test_live_openrouter_runs_an_analysis(model, thinking_level, effort, c
         f"retries {retries}: {result.summary[:160]!r}"
     )
     assert result.summary.strip()
+    # The answer limit (16,000 tokens) leaves room for the whole diagnosis, the last section included
+    assert result.remediation.strip()
     assert result.fallback_attempts == []
     assert retries == []
 
