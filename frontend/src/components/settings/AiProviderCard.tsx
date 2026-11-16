@@ -185,7 +185,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
                 className="min-w-0"
               />
             </div>
-            <p className="text-[11px] text-fg-subtle mt-1">
+            <p className="text-[11px] text-fg-muted mt-1">
               Any server that accepts OpenAI-style requests works. Leave empty to use http://localhost:11434/v1.
             </p>
             {isOpenRouterUrl(aiBaseUrl) && (
