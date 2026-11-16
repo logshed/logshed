@@ -29,7 +29,7 @@
 
 - [Overview](#overview)
 - [What LogShed Solves](#what-logshed-solves)
-- [New in 1.3.0](#new-in-130)
+- [New in 1.4.0](#new-in-140)
 - [Quick Start](#quick-start)
   - [Docker Compose (Recommended)](#docker-compose-recommended)
   - [Docker Run](#docker-run)
@@ -70,15 +70,16 @@ LogShed gives you a central place for your homelab logs in a **single container*
 
 ---
 
-## New in 1.3.0
+## New in 1.4.0
 
-- **Multiple Docker hosts & Sources hub**: Collect container logs from remote Docker hosts over a socket proxy, TCP, or mutual TLS alongside your local Docker socket, and manage all Docker hosts and syslog aliases under **Settings > Sources**.
-- **Home Assistant integration**: Monitor log rates, error counts, alert state, and disk usage in Home Assistant, and trigger maintenance windows from your backup or update automations.
-- **Scoped REST API (`/api/v1`)**: Query logs, check alerts, and trigger maintenance from scripts using Bearer tokens limited to only the scopes they need, with built-in interactive docs at `/docs` and `/redoc`.
-- **MCP server for AI assistants**: Let Claude Desktop, Cursor, Windsurf, or Antigravity search your logs, inspect context around errors, check alerts, and manage maintenance windows.
-- **HTTP log ingest**: Push logs directly from scripts, cron jobs, Vector, or Fluent Bit with `POST /api/v1/ingest`.
-- **AI follow-up questions**: Continue the conversation on an AI diagnosis from the console or Incident History.
-- **Flexible maintenance windows**: Overlap multiple windows, optionally drop incoming error logs during maintenance, and audit every window in Incident History.
+- **Logs in one file per day**: Logs take a little over half the disk space they did, retention deletes a whole day's file so the space comes back at once (no Compact needed), and searches and counts over many days are much faster.
+- **Safer upgrades**: Every upgrade that changes the database backs it up first and shows its progress in the web interface. If it cannot finish, LogShed waits in recovery mode instead of exiting. Make, download and delete backups on the Storage page, and put one back with the `restore` command. (The backup made before the 1.4.0 upgrade leaves out the stored logs: to go back to 1.3.x with your logs, copy `/data` yourself first.)
+- **A Console for busy networks**: A log volume chart you can click to zoom in, logs downloaded as CSV or NDJSON, JSON logs shown as a tree, resizable columns, and a live view that keeps up during a log flood.
+- **Sharper alert rules and maintenance**: Limit an alert rule to some hosts, choose regex or plain text, check a rule against the last 24 hours before saving it, and start targeted or error-dropping maintenance from the web interface.
+- **Sources at a glance**: When each host alias and Docker host last sent a log, the five busiest hosts and apps on the Storage page, and devices that name themselves marked as self-reported.
+- **Settings and AI**: Export and import the whole configuration (secrets under a password you choose), Settings saves only what you changed, and OpenRouter joins the AI providers, with a searchable model list showing each model's price.
+- **Security**: Signing out ends every session, cookies and stored secrets use separate keys, a proxy on loopback is trusted only when listed, and LogShed refuses to run as root.
+- **Home Assistant**: Integration 1.1.0 adds the longest silent source, the last backup and the server's status.
 
 See the [changelog](CHANGELOG.md) for the full list of changes and [upgrade notes](CHANGELOG.md#upgrade-notes).
 
@@ -87,7 +88,7 @@ See the [changelog](CHANGELOG.md) for the full list of changes and [upgrade note
 ## Quick Start
 
 > [!IMPORTANT]
-> **Updating from 1.2.x?** First start of 1.3.0 upgrades the database schema, so back up `/data` first in case you want to roll back. See the [upgrade notes](CHANGELOG.md#upgrade-notes) for details on retention cleanup of old alert history, login-protected API docs, and non-root `PUID`/`PGID` requirements.
+> **Updating from 1.3.x?** The first start of 1.4.0 backs up the database (without the stored logs), then upgrades its schema and stores new logs in one file per day, and every browser signs in again once. If you back up `/data` with your own script, copy every file in it. See the [upgrade notes](CHANGELOG.md#upgrade-notes) before updating, in particular going back to 1.3.x, `PUID`/`PGID` of `0`, and proxies on loopback.
 
 ### Docker Compose (Recommended)
 
