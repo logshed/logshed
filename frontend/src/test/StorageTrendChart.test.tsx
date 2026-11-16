@@ -1,47 +1,48 @@
+import type React from 'react';
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
-import { StorageTrendChart, buildTrendTicks, formatTrendTick } from '../components/storage/StorageTrendChart.tsx';
+import { describe, it, expect, vi } from 'vitest';
+import { StorageTrendChart } from '../components/storage/StorageTrendChart.tsx';
+import type { StorageMetricsSnapshot } from '../types.ts';
 
-// Local-time constructors keep these tests independent of the runner's time zone
-const local = (month: number, day: number, hour: number, minute = 0) =>
-  new Date(2026, month - 1, day, hour, minute).getTime();
+// A server zone other than the runner's: the axis must follow it, not the browser
+vi.mock('../utils/hooks.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/hooks.ts')>()),
+  useServerTimezone: () => 'Asia/Tokyo',
+}));
 
-describe('StorageTrendChart time axis', () => {
-  it('places ticks on even local hours inside the range', () => {
-    // 10/20 16:23 to 10/21 12:07 is about 20 hours, so 3-hour steps give at most 7 ticks
-    const { ticks, stepHours } = buildTrendTicks(local(10, 20, 16, 23), local(10, 21, 12, 7));
-    expect(stepHours).toBe(3);
-    expect(ticks.map((t) => formatTrendTick(t, stepHours))).toEqual([
-      '10/20 18:00',
-      '10/20 21:00',
-      '10/21 00:00',
-      '10/21 03:00',
-      '10/21 06:00',
-      '10/21 09:00',
-      '10/21 12:00',
-    ]);
-  });
+// Recharts measures nothing in jsdom: the chart gets a fixed size, and the stub axis prints the
+// ticks and labels the chart gives it, which is what the server zone decides
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>();
+  const { cloneElement } = await import('react');
+  const mocked = {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement<any> }) =>
+      cloneElement(children, { width: 800, height: 220 }),
+    XAxis: ({ ticks, tickFormatter }: { ticks: number[]; tickFormatter: (v: number) => string }) => (
+      <g data-testid="x-axis">
+        {ticks.map((t) => (
+          <text key={t}>{tickFormatter(t)}</text>
+        ))}
+      </g>
+    ),
+  };
+  return { ...mocked, default: mocked };
+});
 
-  it('never repeats a label when extra snapshots fall in the same hour', () => {
-    // Ticks come from the time range alone, so deletion and compaction snapshots between the
-    // hourly samples cannot add a second '10:00' label
-    const { ticks, stepHours } = buildTrendTicks(local(10, 21, 8), local(10, 21, 12));
-    const labels = ticks.map((t) => formatTrendTick(t, stepHours));
-    expect(new Set(labels).size).toBe(labels.length);
-    expect(labels).toEqual(['10/21 08:00', '10/21 09:00', '10/21 10:00', '10/21 11:00', '10/21 12:00']);
-  });
+// Tokyo is UTC+9 all year
+const tokyo = (day: number, hour: number) => Date.UTC(2026, 9, day, hour) - 9 * 3600_000;
 
-  it('switches to day labels at local midnight for long ranges', () => {
-    const { ticks, stepHours } = buildTrendTicks(local(9, 22, 14), local(10, 21, 14));
-    expect(stepHours).toBe(168);
-    const labels = ticks.map((t) => formatTrendTick(t, stepHours));
-    expect(labels).toEqual(['9/29', '10/6', '10/13', '10/20']);
-    ticks.forEach((t) => expect(new Date(t).getHours()).toBe(0));
-  });
+const snapshot = (ms: number): StorageMetricsSnapshot =>
+  ({ recorded_at: new Date(ms).toISOString(), db_size_bytes: 10 * 1024 * 1024, total_logs_count: 100 }) as StorageMetricsSnapshot;
 
-  it('returns the single point when the range is empty', () => {
-    const point = local(10, 21, 12, 30);
-    expect(buildTrendTicks(point, point)).toEqual({ ticks: [point], stepHours: 1 });
+describe('StorageTrendChart', () => {
+  it('labels the time axis on the server clock', async () => {
+    // Hourly snapshots from 10/20 16:00 to 10/21 12:00 Tokyo time: 3-hour ticks at Tokyo's even hours
+    const history = Array.from({ length: 21 }, (_, i) => snapshot(tokyo(20, 16) + i * 3600_000));
+    render(<StorageTrendChart history={history} />);
+    const axis = await screen.findByTestId('x-axis');
+    expect([...axis.querySelectorAll('text')].map((t) => t.textContent)).toEqual(['10/20 18:00', '10/20 21:00', '10/21 00:00', '10/21 03:00', '10/21 06:00', '10/21 09:00', '10/21 12:00']);
   });
 
   it('shows the empty state without snapshots', () => {

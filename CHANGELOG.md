@@ -65,6 +65,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Storage trend chart on the server's clock**: The 30-day trend chart on the Storage page labelled its time axis and tooltip in the browser's time zone, so for a browser in another zone than the server its times disagreed with the rest of the page and its ticks sat at the browser's midnight. It now uses the server's time zone, as every other time in the web interface does.
 - **A rare crash when ingest stops or pauses**: Stopping LogShed, or pausing writes for a Compact, while a batch of logs was being written could close the database connection under it, which can crash the process. The connection is now closed only once the batch is written.
 - **Retention slider marks line up with the thumb**: On the Storage page the day marks under the retention slider sat up to 8 pixels away from the thumb near the ends (the 3-day mark showed left of the thumb at 3 days). Each mark is now under the thumb at its value.
 - **AI notices in the alert rule dialog use the normal font**: The amber notes that AI enrichment needs an AI provider were set in a monospaced font.

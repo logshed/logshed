@@ -145,7 +145,7 @@ function getDateTimeFormatter(timeZone: string): Intl.DateTimeFormat | null {
   return formatter;
 }
 
-interface DateParts {
+export interface DateParts {
   year: number;
   /** 1-based month */
   month: number;
@@ -156,7 +156,7 @@ interface DateParts {
 }
 
 /** Calendar and clock fields of a date in the given time zone, or in browser time when none (or an invalid one) is given. */
-function getDateParts(date: Date, timeZone?: string): DateParts {
+export function getDateParts(date: Date, timeZone?: string): DateParts {
   const formatter = timeZone ? getDateTimeFormatter(timeZone) : null;
   if (formatter) {
     const parts: DateParts = { year: 0, month: 0, day: 0, hours: '00', minutes: '00', seconds: '00' };
@@ -181,7 +181,7 @@ function getDateParts(date: Date, timeZone?: string): DateParts {
 }
 
 /** The wall-clock time of an instant in the zone, as epoch milliseconds read as if it were UTC. */
-function wallClockMs(epochMs: number, timeZone: string): number {
+export function wallClockMs(epochMs: number, timeZone: string): number {
   const p = getDateParts(new Date(epochMs), timeZone);
   return Date.UTC(p.year, p.month - 1, p.day, Number(p.hours), Number(p.minutes), Number(p.seconds));
 }
@@ -191,7 +191,7 @@ function wallClockMs(epochMs: number, timeZone: string): number {
  * A time shown twice (a clock going back) gives its first occurrence; a time the clock skips
  * (a clock going forward) is moved forward by the length of the gap, as maintenance schedules are.
  */
-function zoneWallClockToEpoch(wallMs: number, timeZone: string): number {
+export function zoneWallClockToEpoch(wallMs: number, timeZone: string): number {
   const offsetBefore = wallClockMs(wallMs - 12 * 3600_000, timeZone) - (wallMs - 12 * 3600_000);
   const offsetAfter = wallClockMs(wallMs + 12 * 3600_000, timeZone) - (wallMs + 12 * 3600_000);
   const matches = [offsetBefore, offsetAfter]
@@ -201,7 +201,7 @@ function zoneWallClockToEpoch(wallMs: number, timeZone: string): number {
 }
 
 /** True when the runtime knows the time zone (an unknown one falls back to browser time everywhere). */
-function isKnownTimeZone(timeZone?: string): timeZone is string {
+export function isKnownTimeZone(timeZone?: string): timeZone is string {
   return Boolean(timeZone && getDateTimeFormatter(timeZone));
 }
 
