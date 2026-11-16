@@ -729,6 +729,28 @@ describe('Log drawer actions open dialogs over the drawer', () => {
     expect(within(dialog).getByLabelText(/Source IP Address/)).toBeDisabled();
   });
 
+  it('Modify Host Alias keeps the alias\'s notes when it saves', async () => {
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([{ ip: '192.168.1.1', alias: 'opnsense-router', notes: 'rack 2' } as any]);
+    const save = vi.spyOn(aliasesApi, 'saveAlias').mockResolvedValue({} as any);
+    const drawer = await openDrawer('Default deny rule matched WAN block', 103);
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Modify Host Alias' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Host Alias - 192.168.1.1' });
+    expect(within(dialog).getByLabelText(/Notes/)).toHaveValue('rack 2');
+    fireEvent.change(within(dialog).getByLabelText(/Friendly Host Alias/), { target: { value: 'router' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update Mapping' }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ ip: '192.168.1.1', alias: 'router', notes: 'rack 2' }));
+  });
+
+  it('Modify Host Alias warns when the notes cannot be read, instead of clearing them silently', async () => {
+    const fetchAliases = vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([{ ip: '192.168.1.1', alias: 'opnsense-router', notes: 'rack 2' } as any]);
+    const drawer = await openDrawer('Default deny rule matched WAN block', 103);
+    fetchAliases.mockRejectedValue(new Error('offline'));
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Modify Host Alias' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Host Alias - 192.168.1.1' });
+    expect(within(dialog).getByText("This alias's notes could not be read; saving now clears them.")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Friendly Host Alias/)).toHaveValue('opnsense-router');
+  });
+
   it('Edit Docker Host opens the Docker host dialog for that host', async () => {
     const drawer = await openDrawer('Container log line', 201);
     fireEvent.click(await within(drawer).findByRole('button', { name: 'Edit Docker Host' }));

@@ -16,6 +16,8 @@ export interface HostAliasFormModalProps {
   initial: HostAliasFormValues;
   /** Editing an existing alias: the address cannot change. */
   editing: boolean;
+  /** A problem to show when the dialog opens (the alias's notes could not be read). */
+  initialError?: string | null;
   onClose: () => void;
   /** Runs after a save, once the dialog has closed. */
   onSaved: () => void | Promise<void>;
@@ -25,12 +27,12 @@ export interface HostAliasFormModalProps {
  * Adds or edits a host alias (an address's friendly name), in Settings > Sources and over the log
  * drawer. Mount it only while it is open; a new key starts it afresh.
  */
-export const HostAliasFormModal: React.FC<HostAliasFormModalProps> = ({ initial, editing, onClose, onSaved }) => {
+export const HostAliasFormModal: React.FC<HostAliasFormModalProps> = ({ initial, editing, initialError = null, onClose, onSaved }) => {
   const [ip, setIp] = useState(initial.ip);
   const [alias, setAlias] = useState(initial.alias ?? '');
   const [notes, setNotes] = useState(initial.notes ?? '');
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

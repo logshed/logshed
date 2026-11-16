@@ -55,7 +55,7 @@ import { ConsoleEmptyKind, ConsoleEmptyState } from './ConsoleEmptyState.tsx';
 import { StreamLoadNote } from './StreamLoadNote.tsx';
 import { useSkippedNote } from './useSkippedNote.ts';
 import { useNearLimit } from '../../utils/nearLimit.ts';
-import { saveAlias } from '../../api/aliases.ts';
+import { fetchAliases, saveAlias } from '../../api/aliases.ts';
 import { useAlias } from '../../context/AliasContext.tsx';
 
 // Loaded on first use, not with the Console
@@ -74,7 +74,7 @@ const DockerHostFormModal = React.lazy(() =>
  * key starts a form afresh; the deleted Docker host notice hands over to the alias or Docker form.
  */
 type DrawerDialog =
-  | { kind: 'alias'; key: number; initial: HostAliasFormValues; editing: boolean }
+  | { kind: 'alias'; key: number; initial: HostAliasFormValues; editing: boolean; initialError?: string }
   | { kind: 'docker'; key: number; host: DockerEndpoint | null; initialAddHost?: { name: string; source_alias: string; url: string } }
   | { kind: 'deleted-docker'; key: number; host: DeletedDockerHost }
   | { kind: 'alert'; key: number; prefill: AlertRulePrefill; channels: NotificationChannel[] };
@@ -904,9 +904,24 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onExplainWithAi={(log, ctxLogs) => selectAndAnalyze(ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log])}
           onInspectWithContext={selectAndAnalyze}
           // Every action opens its dialog on top of the drawer, which stays on the same log
-          onAddAlias={(ip) => {
+          onAddAlias={async (ip) => {
             const alias = sources.aliases[ip];
-            openDrawerDialog({ kind: 'alias', initial: alias ? { ip, alias } : { ip }, editing: Boolean(alias) });
+            if (!alias) {
+              openDrawerDialog({ kind: 'alias', initial: { ip }, editing: false });
+              return;
+            }
+            // The Console knows names only: the alias's notes are read first, so saving keeps them
+            try {
+              const stored = (await fetchAliases()).find((a) => a.ip === ip);
+              openDrawerDialog({ kind: 'alias', initial: { ip, alias: stored?.alias ?? alias, notes: stored?.notes }, editing: true });
+            } catch {
+              openDrawerDialog({
+                kind: 'alias',
+                initial: { ip, alias },
+                editing: true,
+                initialError: "This alias's notes could not be read; saving now clears them.",
+              });
+            }
           }}
           onEditDockerHost={(endpointId) => {
             const host = sources.dockerEndpoints.find((h) => h.id === endpointId);
@@ -932,7 +947,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             const channels = await fetchNotificationChannels().catch(() => [] as NotificationChannel[]);
             openDrawerDialog({
               kind: 'alert',
-              prefill: alertRulePrefillFromLog(targetLog, facets.availableAppsForSelectedHosts),
+              prefill: alertRulePrefillFromLog(targetLog, facets.allAvailableApps),
               channels,
             });
           }}
@@ -956,6 +971,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           key={drawerDialog.key}
           initial={drawerDialog.initial}
           editing={drawerDialog.editing}
+          initialError={drawerDialog.initialError}
           onClose={() => setDrawerDialog(null)}
           onSaved={bumpAliasVersion}
         />
@@ -984,8 +1000,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               isOpen
               ruleToEdit={null}
               channels={drawerDialog.channels}
-              availableApps={facets.availableAppsForSelectedHosts}
-              availableHosts={facets.availableSourcesForSelectedApps}
+              // Every host and app, as on the Rules page, not the lists the Console's filters narrow
+              availableApps={facets.allAvailableApps}
+              availableHosts={facets.allAvailableSources}
               selfReportedHosts={facets.selfReportedHosts}
               isAiConfigured={aiEnabled}
               prefill={drawerDialog.prefill}
