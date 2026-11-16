@@ -273,3 +273,22 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.8;
 }
+
+/* The self-reported host badge (lucide badge-question-mark) after a host name in the log rows:
+   one masked box in the subtle text colour, cheaper per row than an inline SVG. */
+@utility self-reported-mark {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-left: 0.25rem;
+  vertical-align: middle;
+  background-color: var(--color-fg-subtle);
+  /* Printed too: browsers leave out backgrounds when printing */
+  print-color-adjust: exact;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z'/%3E%3Cpath d='M9 9.5a3 2.5 0 016 0c0 2-2 2-3 3.5'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+  /* Forced colours (Windows high contrast) would paint the box's background in the page colour */
+  @media (forced-colors: active) {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
+}

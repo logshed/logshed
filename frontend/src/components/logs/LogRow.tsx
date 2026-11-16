@@ -142,7 +142,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
           <span className="font-mono text-xs truncate">
             <span className="text-fg font-semibold">{log.app_name}</span>
             <span className="text-fg-muted font-normal ml-1">
-              (<HostName name={log.source_alias} selfReported={log.host_self_reported} />)
+              (<HostName name={log.source_alias} selfReported={log.host_self_reported} flat />)
             </span>
           </span>
         </div>
@@ -231,7 +231,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         className="text-fg-soft truncate pr-2"
         title={log.host_self_reported ? selfReportedTitle(log.source_alias, [log.source_ip]) : `${log.source_alias} (${log.source_ip})`}
       >
-        <HostName name={log.source_alias} selfReported={log.host_self_reported} />
+        <HostName name={log.source_alias} selfReported={log.host_self_reported} flat />
       </div>
 
       {/* App Name */}

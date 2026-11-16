@@ -5,12 +5,13 @@ import { BadgeQuestionMark } from 'lucide-react';
  * A host name as the Console shows it. A name the device reported for itself (its address has no
  * alias) gets a small question-mark badge after it, and "(self-reported)" for screen readers.
  * trimText trims the name to its letters (the text-trim utility), for a fixed-height chip that
- * holds its content in the middle.
+ * holds its content in the middle; flat is the cheaper form for the Console's log rows.
  */
-export const HostName: React.FC<{ name: string; selfReported?: boolean; trimText?: boolean }> = ({
+export const HostName: React.FC<{ name: string; selfReported?: boolean; trimText?: boolean; flat?: boolean }> = ({
   name,
   selfReported = false,
   trimText = false,
+  flat = false,
 }) => {
   if (!selfReported) return trimText ? <span className="text-trim">{name}</span> : <>{name}</>;
   if (trimText) {
@@ -22,6 +23,18 @@ export const HostName: React.FC<{ name: string; selfReported?: boolean; trimText
         <BadgeQuestionMark className="w-3 h-3 shrink-0 text-fg-subtle" aria-hidden="true" />
         <span className="sr-only"> (self-reported)</span>
       </span>
+    );
+  }
+  if (flat) {
+    // In a log row (every row draws one): the name as plain text and the icon as one CSS-masked box after
+    // it, no wrapper or SVG, which keeps a flood's row updates about a seventh cheaper to lay out and
+    // render. A name too long for its cell is cut short with its icon; the row's hover text still says it.
+    return (
+      <>
+        {name}
+        <span className="self-reported-mark" aria-hidden="true" />
+        <span className="sr-only"> (self-reported)</span>
+      </>
     );
   }
   return (

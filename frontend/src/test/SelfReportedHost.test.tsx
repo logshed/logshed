@@ -50,6 +50,15 @@ describe('Self-reported host names', () => {
     expect(screen.getByText('(self-reported)')).toHaveClass('sr-only');
   });
 
+  it('draws the row badge as one masked box after the name, with no wrapper or SVG', () => {
+    const { container } = row(reportedLog);
+    const cell = screen.getByText('printer-hp').closest('[title]') as HTMLElement;
+    expect(cell.querySelector('svg')).toBeNull();
+    expect(cell.querySelectorAll('.self-reported-mark')).toHaveLength(1);
+    expect(cell.firstChild?.textContent).toBe('printer-hp');
+    expect(container.querySelector('.inline-flex .self-reported-mark')).toBeNull();
+  });
+
   it('leaves configured names and addresses unmarked', () => {
     row(refusedLog);
     expect(screen.getByText('172.17.0.4')).toBeInTheDocument();
