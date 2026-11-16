@@ -9,11 +9,14 @@ import { demoHistogram } from '../demo/server.ts';
 // ResponsiveContainer measures nothing in jsdom: give the chart a fixed size so its bars render
 vi.mock('recharts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('recharts')>();
-  const { cloneElement } = await import('react');
+  const { cloneElement, useEffect } = await import('react');
   const mocked = {
     ...actual,
-    ResponsiveContainer: ({ children }: { children: React.ReactElement<any> }) =>
-      cloneElement(children, { width: 800, height: 80 }),
+    ResponsiveContainer: ({ children, onResize }: { children: React.ReactElement<any>; onResize?: (w: number, h: number) => void }) => {
+      // Report the size, as the real one does once it has measured the box
+      useEffect(() => onResize?.(804, 80), [onResize]);
+      return cloneElement(children, { width: 804, height: 80 });
+    },
   };
   return { ...mocked, default: mocked };
 });
@@ -45,6 +48,10 @@ afterEach(() => {
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
 });
 
+/** The chart's box (its role=img div), clicked x px from its left edge (jsdom puts it at 0). */
+const chartBox = () => screen.getAllByRole('img').find((el) => el.tagName === 'DIV')!;
+const clickChartAt = (x: number) => fireEvent.click(chartBox(), { clientX: x });
+
 const setVisibility = (state: 'visible' | 'hidden') => {
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
   document.dispatchEvent(new Event('visibilitychange'));
@@ -63,17 +70,17 @@ describe('VolumeHistogram', () => {
   it('shows the total and describes the chart for screen readers', async () => {
     render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    expect(screen.getByText('Log volume, last hour')).toBeInTheDocument();
+    expect(screen.getByText('Log volume, all logs kept')).toBeInTheDocument();
     expect(screen.getByText(': 8')).toBeInTheDocument();
-    expect(screen.getByRole('img')).toHaveAccessibleName(
-      'Log volume, last hour: 8 logs from 3/28 11:00 to 3/28 12:00, most between 3/28 11:00 - 11:30 (7)',
+    expect(chartBox()).toHaveAccessibleName(
+      'Log volume, all logs kept: 8 logs from 3/28 11:00 to 3/28 12:00, most between 3/28 11:00 - 11:30 (7)',
     );
   });
 
   it('shows the time on the server clock', async () => {
     render(<VolumeHistogram filters={{}} timeZone="Asia/Tokyo" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    expect(screen.getByRole('img').getAttribute('aria-label')).toContain('from 3/28 20:00 to 3/28 21:00');
+    expect(chartBox().getAttribute('aria-label')).toContain('from 3/28 20:00 to 3/28 21:00');
   });
 
   it('says when the range has no logs', async () => {
@@ -84,41 +91,61 @@ describe('VolumeHistogram', () => {
     expect(screen.getByText('Log volume')).toBeInTheDocument();
   });
 
-  it('zooms to a bar when it is clicked', async () => {
+  it('zooms to the bar whose column is clicked, however short the bar', async () => {
     const onZoom = vi.fn();
-    const { container } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={onZoom} />);
+    render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={onZoom} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    // Bars draw in order of the stack, error first: the first is the 11:00 bucket's errors
-    const rect = container.querySelector('.recharts-bar-rectangle path, .recharts-bar-rectangle');
-    expect(rect).not.toBeNull();
-    fireEvent.click(rect!);
+    // The plot is 800 px for 11:00 to 12:00: 200 px is 11:15, in the first bar's column
+    clickChartAt(200);
     // The Console's To includes its own moment: the zoom ends a millisecond before the next bar
-    expect(onZoom).toHaveBeenCalledWith('2026-03-28T11:00:00.000Z', '2026-03-28T11:29:59.999Z');
+    expect(onZoom).toHaveBeenLastCalledWith('2026-03-28T11:00:00.000Z', '2026-03-28T11:29:59.999Z');
+    clickChartAt(700);
+    expect(onZoom).toHaveBeenLastCalledWith('2026-03-28T11:30:00.000Z', '2026-03-28T11:59:59.999Z');
   });
 
-  it('on a touch screen zooms on the second tap of a bar, after showing it', async () => {
+  it('on a touch screen pins a tapped bar\'s counts in a box that zooms when tapped', async () => {
     const onZoom = vi.fn();
-    const { container } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={onZoom} />);
+    render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={onZoom} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    const chart = screen.getByRole('img');
-    for (let tap = 0; tap < 2; tap++) {
-      // The first tap redraws the chart (its tooltip): find the bar again each time
-      fireEvent.pointerDown(chart, { pointerType: 'touch' });
-      fireEvent.click(container.querySelector('.recharts-bar-rectangle path, .recharts-bar-rectangle')!);
-      expect(onZoom).toHaveBeenCalledTimes(tap);
-    }
+    fireEvent.pointerDown(chartBox(), { pointerType: 'touch' });
+    clickChartAt(200);
+    expect(onZoom).not.toHaveBeenCalled();
+    const box = screen.getByRole('button', { name: /Tap here to zoom in/ });
+    expect(box).toHaveTextContent('3/28 11:00 - 11:30: 7');
+    fireEvent.click(box);
+    expect(onZoom).toHaveBeenCalledWith('2026-03-28T11:00:00.000Z', '2026-03-28T11:29:59.999Z');
+    expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
+  });
+
+  it('does not zoom into 1-second bars, the smallest, and still draws a lone bar', async () => {
+    fetchSpy.mockResolvedValue({
+      range_from: '2026-03-28T11:00:02+00:00',
+      range_to: '2026-03-28T11:00:03+00:00',
+      bucket_seconds: 1,
+      buckets: [bucket('2026-03-28T11:00:02+00:00', '2026-03-28T11:00:03+00:00', { info: 8 })],
+    });
+    const onZoom = vi.fn();
+    const { container } = render(
+      <VolumeHistogram filters={{ from: '2026-03-28T11:00:02Z', to: '2026-03-28T11:00:02.999Z' }} timeZone="UTC" isMobile={false} onZoom={onZoom} />,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(screen.getByText('1-second bars, the smallest')).toBeInTheDocument();
+    const rects = container.querySelectorAll('.recharts-bar-rectangle');
+    expect(rects).toHaveLength(1);
+    clickChartAt(400);
+    expect(onZoom).not.toHaveBeenCalled();
   });
 
   it('dims the old bars and ignores clicks while new filters load', async () => {
     const onZoom = vi.fn();
-    const { container, rerender } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={onZoom} />);
+    const { rerender } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={onZoom} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
     rerender(<VolumeHistogram filters={{ query: 'disk' }} timeZone="UTC" isMobile={false} onZoom={onZoom} />);
-    expect(screen.getByRole('img')).toHaveAttribute('aria-busy', 'true');
-    fireEvent.click(container.querySelector('.recharts-bar-rectangle path, .recharts-bar-rectangle')!);
+    expect(chartBox()).toHaveAttribute('aria-busy', 'true');
+    clickChartAt(200);
     expect(onZoom).not.toHaveBeenCalled();
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    expect(screen.getByRole('img')).toHaveAttribute('aria-busy', 'false');
+    expect(chartBox()).toHaveAttribute('aria-busy', 'false');
   });
 
   it('shows seconds for bars under a minute', async () => {
@@ -133,13 +160,13 @@ describe('VolumeHistogram', () => {
     });
     render(<VolumeHistogram filters={{ from: '15m' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    expect(screen.getByRole('img').getAttribute('aria-label')).toContain('most between 3/28 11:00:00 - 11:00:15 (3)');
+    expect(chartBox().getAttribute('aria-label')).toContain('most between 3/28 11:00:00 - 11:00:15 (3)');
   });
 
-  it('names the hour before To when only To is set', async () => {
+  it('says up to To when only To is set', async () => {
     render(<VolumeHistogram filters={{ to: HOUR.range_to }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    expect(screen.getByText('Log volume, the hour before To')).toBeInTheDocument();
+    expect(screen.getByText('Log volume up to To')).toBeInTheDocument();
   });
 
   it('fetches again every few seconds while the Console follows new logs', async () => {

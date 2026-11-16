@@ -1152,11 +1152,22 @@ def count_matching(conn: sqlite3.Connection, log_filter: LogFilter) -> int:
 
 
 def stored_time_span(conn: sqlite3.Connection) -> tuple[Optional[int], Optional[int]]:
-    """The oldest and newest stored log's own time (UTC microseconds), from the catalogue; None when empty."""
-    found = [p for p in day_store.parts(conn) if p.min_ts is not None and p.max_ts is not None]
-    if not found:
-        return None, None
-    return min(p.min_ts for p in found), max(p.max_ts for p in found)
+    """
+    The oldest and newest stored log's own time (UTC microseconds); None when nothing is stored.
+    From the catalogue, except for a day file whose figures are not written yet (the open day
+    between storage snapshots), read from its time index.
+    """
+    oldest: Optional[int] = None
+    newest: Optional[int] = None
+    for part in day_store.parts(conn):
+        low, high = part.min_ts, part.max_ts
+        if (low is None or high is None) and not part.legacy:
+            low, high = part.conn.execute("SELECT MIN(ts), MAX(ts) FROM logs").fetchone()
+        if low is None or high is None:
+            continue
+        oldest = low if oldest is None else min(oldest, low)
+        newest = high if newest is None else max(newest, high)
+    return oldest, newest
 
 
 def histogram(conn: sqlite3.Connection, log_filter: LogFilter, edges: list[int]) -> list[dict[int, int]]:

@@ -73,13 +73,13 @@ function spanLabel(bar: VolumeBar, timeZone?: string, withSeconds = false): stri
 }
 
 /** A bar's tooltip: its span and total, then each severity group with logs, worst first. */
-const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string; withSeconds: boolean; tapHint: boolean }> = ({
+const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string; withSeconds: boolean; zoomHint?: string }> = ({
   bar,
   timeZone,
   withSeconds,
-  tapHint,
+  zoomHint,
 }) => (
-  <div className="rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 font-mono text-[11px] text-fg shadow-lg">
+  <div className="rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-left font-mono text-[11px] text-fg shadow-lg">
     <div className="text-fg-strong">
       {spanLabel(bar, timeZone, withSeconds)}: {bar.total.toLocaleString()}
     </div>
@@ -89,9 +89,11 @@ const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string; withSeconds: boo
         {g.label}: {bar[g.key].toLocaleString()}
       </div>
     ))}
-    {tapHint && <div className="text-fg-muted">Tap again to zoom in</div>}
+    {zoomHint && <div className="mt-0.5 text-accent-300">{zoomHint}</div>}
   </div>
 );
+
+const CHART_MARGIN = { top: 4, right: 4, left: 0, bottom: 0 };
 
 /** Only the parts of the filters the counts depend on, as a key that changes when they do. */
 const filterKey = (f: LogFilterParams) =>
@@ -99,8 +101,9 @@ const filterKey = (f: LogFilterParams) =>
 
 /**
  * A small bar chart of how many logs the Console's filters select per time bucket, stacked by
- * severity group, over the Console's time range (the last hour on All Time). Clicking a bar
- * zooms the Console to it. While the Console follows new logs the counts are fetched again
+ * severity group, over the Console's time range (everything kept on All Time). A click anywhere
+ * in a bar's column zooms the Console to it (on a touch screen, a tap pins the bar's counts in a
+ * box, and a tap on the box zooms); 1-second bars, the smallest, do not zoom. While the Console follows new logs the counts are fetched again
  * every few seconds, never from the browser's own buffer, which drops logs under load.
  */
 export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZone, isMobile, onZoom }) => {
@@ -109,12 +112,14 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   // clicked until the new counts arrive, so a click never zooms the new filters to an old bar
   const [dataKey, setDataKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // On a touch screen the first tap on a bar shows its tooltip and the second zooms
+  // The last pointer on the chart: a touch pins a bar's counts instead of zooming at once
   const pointerTypeRef = useRef<string>('mouse');
-  // Read from a ref: Recharts may keep a bar's first click handler across renders
-  const armedRef = useRef<number | null>(null);
-  const [armedStart, setArmedStart] = useState<number | null>(null);
-  const staleRef = useRef(false);
+  const [touchUsed, setTouchUsed] = useState(false);
+  // The bar a tap pinned (its start), shown in a box that zooms when tapped
+  const [pinnedStart, setPinnedStart] = useState<number | null>(null);
+  // The chart's width, which sets the bars' width (Recharts takes it from the gaps between bars,
+  // which a lone bar does not have, so it drew none)
+  const [chartWidth, setChartWidth] = useState(0);
   const key = filterKey(filters);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
@@ -176,8 +181,9 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   const bucketMs = data ? data.bucket_seconds * 1000 : 0;
   const bars = useMemo(() => (data ? data.buckets.map((b, i, all) => toBar(b, i, all, bucketMs)) : []), [data, bucketMs]);
   const stale = data !== null && dataKey !== key;
-  staleRef.current = stale;
   const withSeconds = data !== null && data.bucket_seconds < 60;
+  // 1-second bars are the smallest: zooming into one would show a single bar
+  const canZoom = data !== null && data.bucket_seconds > 1 && !stale;
   const total = bars.reduce((sum, b) => sum + b.total, 0);
   const rangeFrom = data ? Date.parse(data.range_from) : 0;
   const rangeTo = data ? Date.parse(data.range_to) : 0;
@@ -187,8 +193,31 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   );
   const spansDays = rangeTo - rangeFrom > DAY_MS;
   const domain = bars.length > 0 ? [bars[0].mid - bucketMs / 2, bars[bars.length - 1].mid + bucketMs / 2] : [0, 1];
+  const plotWidth = Math.max(chartWidth - CHART_MARGIN.left - CHART_MARGIN.right, 0);
+  const barSize = Math.max(1, Math.floor((plotWidth * bucketMs) / Math.max(domain[1] - domain[0], 1)) - 1);
   let caption = 'Log volume';
-  if (!filters.from) caption = filters.to ? 'Log volume, the hour before To' : 'Log volume, last hour';
+  if (!filters.from) caption = filters.to ? 'Log volume up to To' : 'Log volume, all logs kept';
+  const pinned = pinnedStart === null ? null : (bars.find((b) => b.start === pinnedStart) ?? null);
+  const zoomTo = (bar: VolumeBar) => {
+    setPinnedStart(null);
+    // The Console's To includes its own moment, which is the next bar's start: end a
+    // millisecond before it so the list holds only this bar's logs
+    onZoom(new Date(bar.start).toISOString(), new Date(bar.end - 1).toISOString());
+  };
+  // The column under a click, from its position: Recharts' own active index follows the hover,
+  // which a tap (or a click with no move before it) has not updated yet
+  const onChartClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (stale || bars.length === 0 || plotWidth <= 0) return;
+    const x = e.clientX - e.currentTarget.getBoundingClientRect().left - CHART_MARGIN.left;
+    const at = domain[0] + (x / plotWidth) * (domain[1] - domain[0]);
+    const bar = bars.reduce((near, b) => (Math.abs(b.mid - at) < Math.abs(near.mid - at) ? b : near));
+    if (Math.abs(bar.mid - at) > bucketMs / 2) return;
+    if (pointerTypeRef.current === 'touch') setPinnedStart(bar.start);
+    else if (canZoom) zoomTo(bar);
+  };
+  let hint: string | null = null;
+  if (data && !canZoom && !stale) hint = '1-second bars, the smallest';
+  else if (!isMobile) hint = touchUsed ? 'Tap a bar for its counts' : 'Click a bar to zoom in';
   const busiest = bars.reduce<VolumeBar | null>((top, b) => (!top || b.total > top.total ? b : top), null);
   const summary = data
     ? `${caption}: ${total.toLocaleString()} logs from ${formatTimePoint(rangeFrom, timeZone, withSeconds)} to ${formatTimePoint(rangeTo, timeZone, withSeconds)}` +
@@ -206,11 +235,11 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         {error ? (
           <span role="status" className="text-danger-300 truncate">Could not load the counts: {error}</span>
         ) : (
-          !isMobile && <span>Click a bar to zoom in</span>
+          hint && <span>{hint}</span>
         )}
       </div>
       <div
-        className={`relative ${isMobile ? 'h-14' : 'h-20'} ${stale ? 'opacity-50 pointer-events-none' : ''}`}
+        className={`relative ${isMobile ? 'h-14' : 'h-20'} ${stale ? 'opacity-50 pointer-events-none' : ''} ${canZoom ? 'cursor-pointer' : ''} [&_[tabindex="-1"]]:outline-none`}
         role="img"
         aria-label={summary}
         aria-busy={stale}
@@ -218,11 +247,23 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         data-no-pull-refresh
         onPointerDown={(e) => {
           pointerTypeRef.current = e.pointerType;
+          if (e.pointerType === 'touch') setTouchUsed(true);
         }}
+        // Recharts gives its drawing layers tabindex -1 (none is reached with Tab), so a press would
+        // focus one and the browser drew its focus box around the bars: keep focus where it was
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onChartClick}
       >
         {data && (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={bars} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap={1}>
+          <ResponsiveContainer width="100%" height="100%" onResize={(width) => setChartWidth(width)}>
+            <BarChart
+              data={bars}
+              margin={CHART_MARGIN}
+              barSize={barSize}
+              // Off: its keyboard focus drew the browser's focus box around the bars on every
+              // click. The chart is described by its label; the Time control zooms from the keyboard
+              accessibilityLayer={false}
+            >
               <XAxis
                 dataKey="mid"
                 type="number"
@@ -240,10 +281,9 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                 cursor={{ fill: 'var(--color-raised)' }}
                 wrapperStyle={{ zIndex: 30 }}
                 content={({ active, payload }) => {
-                  const bar = active ? (payload?.[0]?.payload as VolumeBar | undefined) : undefined;
-                  return bar ? (
-                    <BarTooltip bar={bar} timeZone={timeZone} withSeconds={withSeconds} tapHint={armedStart === bar.start} />
-                  ) : null;
+                  // On a touch screen the pinned box takes its place
+                  const bar = active && !touchUsed ? (payload?.[0]?.payload as VolumeBar | undefined) : undefined;
+                  return bar ? <BarTooltip bar={bar} timeZone={timeZone} withSeconds={withSeconds} /> : null;
                 }}
               />
               {GROUPS.map((g) => (
@@ -256,25 +296,33 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                   stroke="var(--color-surface)"
                   strokeWidth={1}
                   isAnimationActive={false}
-                  cursor="pointer"
-                  onClick={(entry: { payload?: VolumeBar }) => {
-                    const bar = entry?.payload;
-                    if (!bar || staleRef.current) return;
-                    if (pointerTypeRef.current === 'touch' && armedRef.current !== bar.start) {
-                      armedRef.current = bar.start;
-                      setArmedStart(bar.start);
-                      return;
-                    }
-                    armedRef.current = null;
-                    setArmedStart(null);
-                    // The Console's To includes its own moment, which is the next bar's start:
-                    // end a millisecond before it so the list holds only this bar's logs
-                    onZoom(new Date(bar.start).toISOString(), new Date(bar.end - 1).toISOString());
-                  }}
                 />
               ))}
             </BarChart>
           </ResponsiveContainer>
+        )}
+        {pinned && !stale && (
+          // Over the chart, centred on its bar and kept inside the chart
+          <div
+            className="absolute top-0 z-20 -translate-x-1/2"
+            style={{ left: `${Math.min(85, Math.max(15, ((pinned.mid - domain[0]) / (domain[1] - domain[0])) * 100))}%` }}
+          >
+            {canZoom ? (
+              <button
+                type="button"
+                className="block cursor-pointer"
+                onClick={(e) => {
+                  // Not also a click on the chart under it
+                  e.stopPropagation();
+                  zoomTo(pinned);
+                }}
+              >
+                <BarTooltip bar={pinned} timeZone={timeZone} withSeconds={withSeconds} zoomHint="Tap here to zoom in" />
+              </button>
+            ) : (
+              <BarTooltip bar={pinned} timeZone={timeZone} withSeconds={withSeconds} />
+            )}
+          </div>
         )}
         {data && total === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-[11px] font-mono text-fg-muted pointer-events-none">

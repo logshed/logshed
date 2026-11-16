@@ -12,14 +12,20 @@ vi.mock('@tanstack/react-virtual', async () => (await import('./liveLogStreamVir
 // ResponsiveContainer measures nothing in jsdom: give the chart a fixed size so its bars render
 vi.mock('recharts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('recharts')>();
-  const { cloneElement } = await import('react');
+  const { cloneElement, useEffect } = await import('react');
   const mocked = {
     ...actual,
-    ResponsiveContainer: ({ children }: { children: React.ReactElement<any> }) =>
-      cloneElement(children, { width: 800, height: 80 }),
+    ResponsiveContainer: ({ children, onResize }: { children: React.ReactElement<any>; onResize?: (w: number, h: number) => void }) => {
+      // Report the size, as the real one does once it has measured the box
+      useEffect(() => onResize?.(804, 80), [onResize]);
+      return cloneElement(children, { width: 804, height: 80 });
+    },
   };
   return { ...mocked, default: mocked };
 });
+
+/** The histogram's own box (role=img div), which takes the clicks; jsdom puts it at x 0. */
+const chartBox = (container: HTMLElement) => container.querySelector('[data-testid=volume-histogram] > div[role=img]')!;
 
 const PREF_KEY = 'logshed.console.histogram.v1';
 
@@ -64,7 +70,7 @@ describe('Console volume histogram', () => {
     await waitFor(() => expect(container.querySelector('.recharts-bar-rectangle')).not.toBeNull());
     const fetchLogs = vi.mocked(logsApi.fetchLogs);
     fetchLogs.mockClear();
-    fireEvent.click(container.querySelector('.recharts-bar-rectangle')!);
+    fireEvent.click(chartBox(container), { clientX: 200 });
 
     await waitFor(() =>
       expect(fetchLogs).toHaveBeenCalledWith(
@@ -78,7 +84,7 @@ describe('Console volume histogram', () => {
 
     // A second click on the bar now shown adds no history entry, so one Back still returns
     const entries = window.history.length;
-    fireEvent.click(container.querySelector('.recharts-bar-rectangle')!);
+    fireEvent.click(chartBox(container), { clientX: 200 });
     expect(window.history.length).toBe(entries);
 
     fetchLogs.mockClear();

@@ -1,8 +1,8 @@
 """
 Log counts per time bucket for the Console's volume histogram.
 
-The range is the Console's own (its From and To, or the last hour when it has no From), cut into
-about 60 buckets on the server's clock. Ranges over 12 hours use whole hours or more, so a sealed
+The range is the Console's own (its From and To; with no From, from the oldest stored log, as the
+Console's All Time lists everything kept), cut into about 60 buckets on the server's clock. Ranges over 12 hours use whole hours or more, so a sealed
 day's counts come from the catalogue instead of its file (log_store.histogram).
 """
 
@@ -16,7 +16,7 @@ from app.services import log_store
 from app.services.log_query import LogFilter
 
 # The window shown when the Console has no start time (All Time)
-DEFAULT_WINDOW = datetime.timedelta(hours=1)
+DEFAULT_WINDOW = datetime.timedelta(hours=1)  # with no From and nothing stored before the end
 # About this many bars at most; the bucket is the smallest step that keeps within it
 MAX_BUCKETS = 60
 # Bucket sizes in seconds. Every size under a day divides 30 minutes or a day, so buckets line up
@@ -108,15 +108,23 @@ def _wall_to_epoch(wall: datetime.datetime, tz: datetime.tzinfo) -> int:
     return int(wall.replace(tzinfo=tz, fold=0).timestamp())
 
 
-def histogram_range(log_filter: LogFilter, now: datetime.datetime) -> tuple[int, int]:
+def histogram_range(
+    log_filter: LogFilter, now: datetime.datetime, oldest_stored: Optional[int] = None
+) -> tuple[int, int]:
     """
     The time range (UTC epoch seconds) the histogram shows for a filter: its From and To, with
-    now for a missing To, and the hour before the end for a missing From.
+    now for a missing To, and for a missing From the oldest stored log's time (oldest_stored),
+    or the hour before the end when nothing is stored before it.
     """
     # Rounded up: a To inside a second (a zoomed bar ends a millisecond before the next) keeps
     # that second's bucket whole
     end = math.ceil(_epoch_exact(log_filter.to_ts)) if log_filter.to_ts else int(now.timestamp())
-    start = _epoch(log_filter.from_ts) if log_filter.from_ts else end - int(DEFAULT_WINDOW.total_seconds())
+    if log_filter.from_ts:
+        start = _epoch(log_filter.from_ts)
+    elif oldest_stored is not None and oldest_stored < end:
+        start = oldest_stored
+    else:
+        start = end - int(DEFAULT_WINDOW.total_seconds())
     return start, max(end, start + 1)
 
 
@@ -156,10 +164,12 @@ def build_histogram(
 ) -> Histogram:
     """Counts by severity group in each bucket of the filter's range (see the module docstring)."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
-    range_from, range_to = clamp_to_stored(conn, *histogram_range(log_filter, now), int(now.timestamp()))
+    oldest_us = None if log_filter.from_ts else log_store.stored_time_span(conn)[0]
+    oldest = oldest_us // 1_000_000 if oldest_us is not None else None
+    range_from, range_to = clamp_to_stored(conn, *histogram_range(log_filter, now, oldest), int(now.timestamp()))
     size = choose_bucket(range_to - range_from)
     edges = bucket_edges(range_from, range_to, size, tz)
-    # The range's own bounds (the hour before now for All Time) apply as well as the buckets'
+    # The range's own bounds apply as well as the buckets'
     bounded = LogFilter(
         query=log_filter.query,
         sources=log_filter.sources,

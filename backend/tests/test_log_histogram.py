@@ -122,8 +122,9 @@ class TestBuckets:
         # The day the clock goes forward has 23 hours
         assert edges[4] - edges[3] == 23 * 3600
 
-    def test_no_start_shows_the_hour_before_the_end(self):
+    def test_no_start_shows_from_the_oldest_stored_log_or_else_the_hour_before_the_end(self):
         now = datetime.datetime.fromtimestamp(_s(D2, 12, 30), _UTC)
+        assert log_histogram.histogram_range(LogFilter(), now, oldest_stored=_s(D1, 3)) == (_s(D1, 3), _s(D2, 12, 30))
         assert log_histogram.histogram_range(LogFilter(), now) == (_s(D2, 11, 30), _s(D2, 12, 30))
         bounded = LogFilter(to_ts=_iso(_s(D2, 6)))
         assert log_histogram.histogram_range(bounded, now) == (_s(D2, 5), _s(D2, 6))
@@ -241,7 +242,7 @@ class TestBuild:
         _write(db, [_row(D2, 11, 45, severity=2), _row(D2, 11, 46, severity=6), _row(D2, 12, 10, severity=4)])
         now = datetime.datetime.fromtimestamp(_s(D2, 12, 30, 30), _UTC)
         with open_db(db) as conn:
-            result = log_histogram.build_histogram(conn, LogFilter(), _UTC, now=now)
+            result = log_histogram.build_histogram(conn, LogFilter(from_ts=_iso(_s(D2, 11, 30, 30))), _UTC, now=now)
         assert (result.range_from, result.range_to, result.bucket_seconds) == (_s(D2, 11, 30, 30), _s(D2, 12, 30, 30), 60)
         assert len(result.buckets) == 61
         assert (result.buckets[0].start, result.buckets[0].end) == (_s(D2, 11, 30, 30), _s(D2, 11, 31))
@@ -261,6 +262,31 @@ class TestBuild:
         assert len(result.buckets) == 60
         assert result.buckets[-1].end == _s(D2, 11)
         assert result.buckets[-1].counts["info"] == 2
+
+
+class TestAllTime:
+    def test_all_time_spans_every_stored_log(self, db):
+        # Matches the Console's All Time, which lists everything kept
+        _write(db, [_row(D1, 3), _row(D2, 1, severity=3)])
+        _seal_d1(db)
+        now = datetime.datetime.fromtimestamp(_s(D2, 2), _UTC)
+        with open_db(db) as conn:
+            result = log_histogram.build_histogram(conn, LogFilter(), _UTC, now=now)
+        assert (result.range_from, result.range_to) == (_s(D1, 3), _s(D2, 2))
+        assert result.bucket_seconds == 3600
+        assert sum(sum(b.counts.values()) for b in result.buckets) == 2
+
+    def test_the_open_day_s_times_come_from_its_file_before_its_figures_are_written(self, db):
+        _write(db, [_row(D2, 1, 20), _row(D2, 1, 50)])
+        with open_db(db) as conn:
+            conn.execute("UPDATE log_files SET min_ts = NULL, max_ts = NULL")
+            assert log_store.stored_time_span(conn) == (_s(D2, 1, 20) * 1_000_000, _s(D2, 1, 50) * 1_000_000)
+
+    def test_with_nothing_stored_it_shows_the_last_hour(self, db):
+        now = datetime.datetime.fromtimestamp(_s(D2, 2), _UTC)
+        with open_db(db) as conn:
+            result = log_histogram.build_histogram(conn, LogFilter(), _UTC, now=now)
+        assert (result.range_from, result.range_to) == (_s(D2, 1), _s(D2, 2))
 
 
 class TestLongRanges:
