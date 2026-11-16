@@ -280,6 +280,8 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
               <Tooltip
                 cursor={{ fill: 'var(--color-raised)' }}
                 wrapperStyle={{ zIndex: 30 }}
+                // Shown in place: animated, it slid in from the chart's left edge each time it appeared
+                isAnimationActive={false}
                 content={({ active, payload }) => {
                   // On a touch screen the pinned box takes its place
                   const bar = active && !touchUsed ? (payload?.[0]?.payload as VolumeBar | undefined) : undefined;
@@ -301,35 +303,28 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
             </BarChart>
           </ResponsiveContainer>
         )}
-        {pinned && !stale && (
-          // Over the chart, centred on its bar and kept inside the chart
-          <div
-            className="absolute top-0 z-20 -translate-x-1/2"
-            style={{ left: `${Math.min(85, Math.max(15, ((pinned.mid - domain[0]) / (domain[1] - domain[0])) * 100))}%` }}
-          >
-            {canZoom ? (
-              <button
-                type="button"
-                className="block cursor-pointer"
-                onClick={(e) => {
-                  // Not also a click on the chart under it
-                  e.stopPropagation();
-                  zoomTo(pinned);
-                }}
-              >
-                <BarTooltip bar={pinned} timeZone={timeZone} withSeconds={withSeconds} zoomHint="Tap here to zoom in" />
-              </button>
-            ) : (
-              <BarTooltip bar={pinned} timeZone={timeZone} withSeconds={withSeconds} />
-            )}
-          </div>
-        )}
         {data && total === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-[11px] font-mono text-fg-muted pointer-events-none">
             No logs in this range
           </div>
         )}
       </div>
+      {pinned && !stale && (
+        // Below the chart (over the top of the log list), under its bar, so the bars stay in view and
+        // another can be tapped; its centre follows the bar but stays inside the band
+        <div
+          className="absolute top-full z-20 mt-1 -translate-x-1/2"
+          style={{ left: `calc(0.75rem + (100% - 1.5rem) * ${Math.min(0.85, Math.max(0.15, (pinned.mid - domain[0]) / (domain[1] - domain[0])))})` }}
+        >
+          {canZoom ? (
+            <button type="button" className="block cursor-pointer" onClick={() => zoomTo(pinned)}>
+              <BarTooltip bar={pinned} timeZone={timeZone} withSeconds={withSeconds} zoomHint="Tap here to zoom in" />
+            </button>
+          ) : (
+            <BarTooltip bar={pinned} timeZone={timeZone} withSeconds={withSeconds} />
+          )}
+        </div>
+      )}
     </div>
   );
 };
