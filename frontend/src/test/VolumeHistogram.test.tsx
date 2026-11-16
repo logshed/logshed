@@ -110,6 +110,10 @@ describe('VolumeHistogram', () => {
     fireEvent.pointerDown(chartBox(), { pointerType: 'touch' });
     clickChartAt(200);
     expect(onZoom).not.toHaveBeenCalled();
+    // The tapped bar (the first) is drawn darker than the others
+    const opacities = [...document.querySelectorAll('.recharts-bar-rectangle path')].map((el) => el.getAttribute('fill-opacity'));
+    expect(opacities).toContain('0.45');
+    expect(opacities).toContain('1');
     const box = screen.getByRole('button', { name: /Tap here to zoom in/ });
     expect(box).toHaveTextContent('3/28 11:00 - 11:30: 7');
     fireEvent.click(box);

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fetchLogHistogram, LogHistogram, LogHistogramBucket } from '../../api/logs.ts';
 import { LogFilterParams } from '../../types.ts';
 import { DAY_MS, buildTimeTicks, formatTimePoint, formatTimeTick } from '../../utils/timeAxis.ts';
@@ -92,6 +92,9 @@ const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string; withSeconds: boo
     {zoomHint && <div className="mt-0.5 text-accent-300">{zoomHint}</div>}
   </div>
 );
+
+// The tapped bar's colours over the dark band: about half as bright as the others
+const PINNED_OPACITY = 0.45;
 
 const CHART_MARGIN = { top: 4, right: 4, left: 0, bottom: 0 };
 
@@ -298,7 +301,12 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                   stroke="var(--color-surface)"
                   strokeWidth={1}
                   isAnimationActive={false}
-                />
+                >
+                  {/* The tapped bar is drawn darker, which shows even when it fills the chart's height */}
+                  {bars.map((b) => (
+                    <Cell key={b.start} fillOpacity={pinned && !stale && b.start === pinned.start ? PINNED_OPACITY : 1} />
+                  ))}
+                </Bar>
               ))}
             </BarChart>
           </ResponsiveContainer>
