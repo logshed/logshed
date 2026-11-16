@@ -11,7 +11,14 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
-from app.core.ai_providers import AI_PROVIDERS, DEFAULT_AI_PROVIDER, get_ai_provider, normalize_provider_id, stored_provider_setting
+from app.core.ai_providers import (
+    AI_PROVIDERS,
+    DEFAULT_AI_PROVIDER,
+    get_ai_provider,
+    normalize_provider_id,
+    provider_has_fixed_base_url,
+    stored_provider_setting,
+)
 from app.core.config import (
     DEFAULT_AI_MODEL,
     get_all_system_settings,
@@ -282,7 +289,8 @@ async def update_settings(
             updates.append(("ai_fallback_models", req.ai_fallback_models, 0))
             updates.append((f"ai_fallback_models_{target_provider}", req.ai_fallback_models, 0))
 
-        if req.ai_base_url is not None:
+        # A provider with its own address keeps no base URL, so a stored key never follows one elsewhere.
+        if req.ai_base_url is not None and not provider_has_fixed_base_url(target_provider):
             updates.append(("ai_base_url", req.ai_base_url, 0))
             updates.append((f"ai_base_url_{target_provider}", req.ai_base_url, 0))
 
@@ -306,7 +314,7 @@ async def update_settings(
                     updates.append((f"ai_fallback_models_{p_clean}", p_cfg.ai_fallback_models, 0))
                     if p_clean == target_provider and req.ai_fallback_models is None:
                         updates.append(("ai_fallback_models", p_cfg.ai_fallback_models, 0))
-                if "ai_base_url" in sent and p_cfg.ai_base_url is not None:
+                if "ai_base_url" in sent and p_cfg.ai_base_url is not None and not provider_has_fixed_base_url(p_clean):
                     updates.append((f"ai_base_url_{p_clean}", p_cfg.ai_base_url, 0))
                     if p_clean == target_provider and req.ai_base_url is None:
                         updates.append(("ai_base_url", p_cfg.ai_base_url, 0))

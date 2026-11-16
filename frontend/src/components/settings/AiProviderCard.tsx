@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertCircle, Brain, Info, Lock, RefreshCw, RotateCcw } from 'lucide-react';
 import { MASKED_SECRET } from '../../api/settings.ts';
 import { DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, aiModelOption } from '../../utils/aiPrompt.ts';
-import { aiProviderOptions, getAiProvider, providerNeedsApiKey } from '../../utils/aiProviders.ts';
+import { aiProviderOptions, getAiProvider, isOpenRouterUrl, providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { ModelChainEditor } from '../ai/ModelChainEditor.tsx';
@@ -15,7 +15,6 @@ import { CHECKBOX_CLASS, Field, LABEL_CLASS, SELECT_FIELD_CLASS, TextArea, TextF
 // Base URLs of common servers that accept OpenAI-style requests. Ollama and LM Studio run on the
 // Docker host, which the LogShed container reaches as host.docker.internal.
 const OPENAI_COMPATIBLE_PRESETS: { label: string; url: string }[] = [
-  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
   { label: 'Ollama (Docker host)', url: 'http://host.docker.internal:11434/v1' },
   { label: 'LM Studio (Docker host)', url: 'http://host.docker.internal:1234/v1' },
   { label: 'Groq', url: 'https://api.groq.com/openai/v1' },
@@ -189,6 +188,12 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
             <p className="text-[11px] text-fg-subtle mt-1">
               Any server that accepts OpenAI-style requests works. Leave empty to use http://localhost:11434/v1.
             </p>
+            {isOpenRouterUrl(aiBaseUrl) && (
+              <p className="text-[11px] text-accent-300 mt-1">
+                OpenRouter is now a provider of its own, with each model's price, context size and reasoning
+                settings. Choose OpenRouter as the AI Provider to use it (enter your key there); this setup keeps working.
+              </p>
+            )}
           </div>
         )}
 
@@ -288,9 +293,10 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               id="ai-model"
               labelledBy="ai-model-label"
               label="Default Primary Model"
+              searchable
               options={[
                 ...availableModels.filter((m) => m.id === aiModel || !fallbackList.includes(m.id)).map(aiModelOption),
-                { value: '__custom__', label: 'Custom model name...' },
+                { value: '__custom__', label: 'Custom model name...', pinned: true },
               ]}
               value={availableModels.some((m) => m.id === aiModel) ? aiModel : '__custom__'}
               onChange={(v) => {

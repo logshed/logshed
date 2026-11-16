@@ -9,6 +9,7 @@ endpoints, as required by SPEC §4.2 and AGENTS.md.
 
 import asyncio
 import datetime
+import json
 import logging
 import re
 import urllib.parse
@@ -27,7 +28,7 @@ from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from openai import APIConnectionError, AsyncOpenAI, APITimeoutError, BadRequestError
 
-from app.core.ai_providers import default_model_for, get_ai_provider, normalize_provider_id
+from app.core.ai_providers import default_model_for, get_ai_provider, normalize_provider_id, provider_base_url
 from app.core.config import AI_THINKING_LEVELS, DEFAULT_AI_THINKING_LEVEL, DEFAULT_AI_TIMEOUT, is_debug_or_dev
 from app.core.net_guard import GuardedOpenAIHttpClient
 from app.core.redactor import redact
@@ -186,8 +187,62 @@ def openai_model_takes_temperature(model_name: str) -> bool:
     return not supports_openai_reasoning(model_name)
 
 
-def _openai_sampling_kwargs(model: str, thinking_level: Optional[str]) -> dict[str, Any]:
-    """The temperature or reasoning effort LogShed sends with an OpenAI or OpenAI-compatible request."""
+# OpenRouter's reasoning efforts, lowest first
+_OPENROUTER_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _openrouter_effort(level: str, params: dict[str, Any]) -> Optional[str]:
+    """
+    The reasoning effort to ask OpenRouter for: the thinking level (off is none), or the nearest
+    effort the model lists, the lower one on a tie. None sends no reasoning setting, so the model
+    uses its own default: for a model without reasoning, or off on a model that always reasons.
+    """
+    if not params.get("supports_reasoning"):
+        return None
+    wanted = "none" if level == "off" else level
+    mandatory = bool(params.get("reasoning_mandatory"))
+    efforts = params.get("reasoning_efforts")
+    if not efforts:
+        return None if wanted == "none" and mandatory else wanted
+    allowed = [e for e in _OPENROUTER_EFFORTS if e in efforts and not (e == "none" and mandatory)]
+    if wanted in allowed:
+        return wanted
+    if not allowed:
+        return None
+    target = _OPENROUTER_EFFORTS.index(wanted)
+    return min(allowed, key=lambda e: (abs(_OPENROUTER_EFFORTS.index(e) - target), _OPENROUTER_EFFORTS.index(e)))
+
+
+def _openrouter_sampling_kwargs(
+    model: str, thinking_level: Optional[str], params: Optional[dict[str, Any]]
+) -> dict[str, Any]:
+    """
+    The reasoning and temperature for an OpenRouter request, from what its model list says the model
+    accepts. A model not in the list (typed by hand) gets the thinking level as its effort, or no
+    reasoning setting when off, and a temperature only when it is not reasoning and looks like it takes one.
+    """
+    level = _thinking_level(thinking_level)
+    if params is None:
+        params = {"supports_reasoning": level != "off", "takes_temperature": openai_model_takes_temperature(model)}
+    effort = _openrouter_effort(level, params)
+    kwargs: dict[str, Any] = {}
+    if effort is not None:
+        kwargs["extra_body"] = {"reasoning": {"effort": effort}}
+    # A reasoning model takes no temperature from LogShed, as on OpenAI
+    if effort in (None, "none") and params.get("takes_temperature") and not params.get("reasoning_mandatory"):
+        kwargs["temperature"] = 0.2
+    return kwargs
+
+
+def _openai_sampling_kwargs(
+    model: str, thinking_level: Optional[str], model_params: Optional[dict[str, dict[str, Any]]] = None
+) -> dict[str, Any]:
+    """
+    The temperature or reasoning effort LogShed sends with an OpenAI or OpenAI-compatible request.
+    `model_params` is set for OpenRouter: what each listed model accepts, by model id.
+    """
+    if model_params is not None:
+        return _openrouter_sampling_kwargs(model, thinking_level, model_params.get(model))
     kwargs: dict[str, Any] = {}
     if openai_model_takes_temperature(model):
         kwargs["temperature"] = 0.2
@@ -201,13 +256,19 @@ async def _create_chat_completion(client: AsyncOpenAI, create_kwargs: dict[str, 
     Send the chat completion request. The accepted reasoning efforts differ by model (GPT-6 Sol
     refuses none, some models accept only high), so when the endpoint refuses reasoning_effort the
     request is sent again: at low when none was refused, otherwise without it, at the model's own
-    default effort.
+    default effort. An OpenRouter request whose reasoning setting is refused is sent again without it.
     """
     attempt_kwargs = create_kwargs
     while True:
         try:
             return await client.chat.completions.create(**attempt_kwargs)
         except BadRequestError as e:
+            # OpenRouter: a model that refuses the reasoning setting is asked again without it
+            extra_body = attempt_kwargs.get("extra_body") or {}
+            if "reasoning" in extra_body and "reasoning" in str(e).lower():
+                attempt_kwargs = {k: v for k, v in attempt_kwargs.items() if k != "extra_body"}
+                logger.info(f"Model {attempt_kwargs.get('model')} refused the reasoning setting; retrying without it.")
+                continue
             refused_effort = getattr(e, "param", None) == "reasoning_effort" or "reasoning_effort" in str(e)
             if "reasoning_effort" not in attempt_kwargs or not refused_effort:
                 raise
@@ -555,12 +616,101 @@ async def _list_openai_compatible_models(api_key: Optional[str], base_url: Optio
     return discovered_models
 
 
+def _openrouter_price(value: Any) -> Optional[float]:
+    """An OpenRouter price per token as US dollars per million tokens. None when unknown or variable (a router's -1)."""
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if price < 0 else round(price * 1_000_000, 6)
+
+
+def openrouter_model_entry(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """
+    One model from OpenRouter's /models list as a LogShed model entry, or None when it cannot answer
+    a chat request with text: models that take or give no text, models that also give images, audio
+    or video (except routers such as openrouter/auto, which pass a text request to a text model),
+    and the `:batch` variants, which only the batch API serves. A model with an end date is marked
+    deprecated. Besides the fields
+    every provider has, the entry keeps the price and context size shown in the model picker and
+    what the model accepts (`params`), read again for each request.
+    """
+    model_id = str(raw.get("id") or "")
+    architecture = raw.get("architecture") or {}
+    outputs = architecture.get("output_modalities") or []
+    is_router = architecture.get("tokenizer") == "Router"
+    if not model_id or "text" not in outputs or (outputs != ["text"] and not is_router):
+        return None
+    if "text" not in (architecture.get("input_modalities") or []):
+        return None
+    endpoints = raw.get("endpoints")
+    if model_id.endswith(":batch") or (endpoints is not None and "/api/v1/chat/completions" not in endpoints):
+        return None
+    if not is_text_generation_model(model_id):
+        return None
+    supported = raw.get("supported_parameters") or []
+    reasoning = raw.get("reasoning") or {}
+    pricing = raw.get("pricing") or {}
+    context_length = raw.get("context_length")
+    return {
+        "id": model_id,
+        "name": raw.get("name") or model_id,
+        "description": None,
+        "supports_thinking": "reasoning" in supported,
+        "is_deprecated": bool(raw.get("expiration_date")),
+        "context_length": context_length if isinstance(context_length, int) and context_length > 0 else None,
+        "prompt_price": _openrouter_price(pricing.get("prompt")),
+        "completion_price": _openrouter_price(pricing.get("completion")),
+        "params": {
+            "supports_reasoning": "reasoning" in supported,
+            "reasoning_mandatory": bool(reasoning.get("mandatory")),
+            "reasoning_efforts": [e for e in reasoning.get("supported_efforts") or [] if e in _OPENROUTER_EFFORTS] or None,
+            "takes_temperature": "temperature" in supported,
+        },
+    }
+
+
+async def _list_openrouter_models(api_key: Optional[str], base_url: Optional[str]) -> list[dict[str, Any]]:
+    """OpenRouter's chat models, always from its own address (the stored base URL is not used)."""
+    discovered_models: list[dict[str, Any]] = []
+    if not api_key:
+        return []
+    client = _openai_client(api_key, provider_base_url("openrouter", None) or "")
+    try:
+        paginator = client.models.list()
+        async for m in paginator:
+            entry = openrouter_model_entry(m.to_dict())
+            if entry is not None:
+                discovered_models.append(entry)
+    finally:
+        await _close_sdk_client(client)
+    return discovered_models
+
+
+def model_params_by_id(models_cache_json: Optional[str]) -> dict[str, dict[str, Any]]:
+    """What each model accepts, by id, from a provider's cached model list. Empty when there is none."""
+    if not models_cache_json:
+        return {}
+    try:
+        items = json.loads(models_cache_json)
+    except ValueError:
+        return {}
+    if not isinstance(items, list):
+        return {}
+    return {
+        item["id"]: item["params"]
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("params"), dict)
+    }
+
+
 # Model discovery per provider id: each provider filters its own list
 _MODEL_LISTERS: dict[str, Callable[[Optional[str], Optional[str]], Awaitable[list[dict[str, Any]]]]] = {
     "gemini": _list_gemini_models,
     "openai": _list_openai_models,
     "anthropic": _list_anthropic_models,
     "openai_compatible": _list_openai_compatible_models,
+    "openrouter": _list_openrouter_models,
 }
 
 
@@ -1076,10 +1226,11 @@ async def call_openai(
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
     thinking_level: Optional[str] = None,
+    model_params: Optional[dict[str, dict[str, Any]]] = None,
 ) -> tuple[str, int, int, int, int]:
     """
     Dispatch request to OpenAI or OpenAI-compatible endpoint (e.g. Ollama, vLLM, LocalAI)
-    via the openai SDK with configurable base_url.
+    via the openai SDK with configurable base_url. `model_params` is set for OpenRouter.
     """
     effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
 
@@ -1090,7 +1241,7 @@ async def call_openai(
                 {"role": "system", "content": effective_system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            **_openai_sampling_kwargs(model, thinking_level),
+            **_openai_sampling_kwargs(model, thinking_level, model_params),
         }
 
         response = await _create_chat_completion(client, create_kwargs)
@@ -1368,10 +1519,12 @@ async def execute_ai_analysis(
     fallback_models: Optional[list[str]] = None,
     on_progress: Optional[Callable[[dict], Any]] = None,
     thinking_level: Optional[str] = None,
+    model_params: Optional[dict[str, dict[str, Any]]] = None,
 ) -> AiAnalysisResult:
     """
     Unified entrypoint to run on-demand AI analysis with automatic multi-model failover.
     Attempts primary model first; if it fails with 503 or timeout, attempts configured fallback models.
+    `model_params` (OpenRouter only) says what each model accepts, by id.
     """
     redacted_logs = truncate_logs_to_budget(redacted_logs)
 
@@ -1425,6 +1578,8 @@ async def execute_ai_analysis(
         }
         if get_ai_provider(norm_provider).sdk == "openai":
             dispatch_kwargs["base_url"] = base_url
+            if model_params is not None:
+                dispatch_kwargs["model_params"] = model_params
 
         try:
             raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used, *served = await dispatch(**dispatch_kwargs)
@@ -1558,6 +1713,7 @@ async def dispatch_multi_turn_openai(
     timeout: float = DEFAULT_AI_TIMEOUT,
     thinking_level: Optional[str] = None,
     on_delta: Optional[Callable[[str], Any]] = None,
+    model_params: Optional[dict[str, dict[str, Any]]] = None,
 ) -> tuple[str, int, int, int, int]:
     """
     Stream a multi-turn conversation to OpenAI or an OpenAI-compatible endpoint via the openai SDK.
@@ -1568,7 +1724,7 @@ async def dispatch_multi_turn_openai(
         create_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "system", "content": system_prompt}] + messages,
-            **_openai_sampling_kwargs(model, thinking_level),
+            **_openai_sampling_kwargs(model, thinking_level, model_params),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -1640,6 +1796,7 @@ async def execute_ai_follow_up(
     timeout: float = DEFAULT_AI_TIMEOUT,
     thinking_level: Optional[str] = None,
     on_progress: Optional[Callable[[dict], Any]] = None,
+    model_params: Optional[dict[str, dict[str, Any]]] = None,
 ) -> tuple[str, int, int, int, int, str, list[str]]:
     """
     Run a follow-up conversation turn with automatic multi-model failover.
@@ -1704,6 +1861,7 @@ async def execute_ai_follow_up(
                     timeout=timeout,
                     thinking_level=thinking_level,
                     on_delta=on_delta,
+                    model_params=model_params,
                 )
             text, tokens_in, tokens_out, tokens_thoughts, tokens_used, *served = result
             model_used = _note_server_fallback(current_model, served, fallback_attempts)

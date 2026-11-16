@@ -18,7 +18,7 @@ import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '.
 import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../api/ai.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, aiModelOption } from '../../utils/aiPrompt.ts';
-import { DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey } from '../../utils/aiProviders.ts';
+import { AI_PROVIDERS, DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
@@ -42,6 +42,10 @@ interface ProviderLocalState {
   model: string;
   fallbackModels: string;
 }
+
+// One entry per provider in the registry; a provider that needs no key counts as having one
+const defaultProviderConfigs = (): Record<string, ProviderLocalState> =>
+  Object.fromEntries(AI_PROVIDERS.map((p) => [p.id, { hasKey: !p.needsApiKey, model: p.defaultModel, fallbackModels: '' }]));
 
 interface AiAnalysisModalProps {
   isOpen: boolean;
@@ -81,12 +85,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [model, setModel] = useState<string>(DEFAULT_AI_MODEL);
   const [fallbackModels, setFallbackModels] = useState<string>('');
 
-  const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
-    gemini: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '' },
-    openai: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '' },
-    anthropic: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '' },
-    openai_compatible: { hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '' },
-  });
+  const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>(defaultProviderConfigs);
 
   // Model discovery states
   const [availableModels, setAvailableModels] = useState<AiModelInfo[]>([]);
@@ -260,12 +259,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       setModel(res.model || DEFAULT_PROVIDER_MODELS[activeP] || DEFAULT_AI_MODEL);
 
       // Initialize provider configs from system settings
-      const configs: Record<string, ProviderLocalState> = {
-        gemini: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '' },
-        openai: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '' },
-        anthropic: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '' },
-        openai_compatible: { hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '' },
-      };
+      const configs = defaultProviderConfigs();
 
       if (settRes?.ai_providers_config) {
         for (const [p, pCfg] of Object.entries(settRes.ai_providers_config)) {
@@ -798,11 +792,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         id={`${fieldId}-model`}
                         labelledBy={`${fieldId}-model-label`}
                         label="Primary Model"
+                        searchable
                         options={[
                           ...availableModels
                             .filter((m) => m.id === model || !fallbackList.includes(m.id))
                             .map(aiModelOption),
-                          { value: '__custom__', label: 'Custom model name...' },
+                          { value: '__custom__', label: 'Custom model name...', pinned: true },
                         ]}
                         value={availableModels.some((m) => m.id === model) ? model : '__custom__'}
                         onChange={(v) => {

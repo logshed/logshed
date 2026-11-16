@@ -133,6 +133,42 @@ export function isTextModel(modelId: string): boolean {
 }
 
 /** A model as a row of the model dropdowns: its id, marked when it can reason. */
-export function aiModelOption(m: AiModelInfo): { value: string; label: string } {
-  return { value: m.id, label: m.supports_thinking ? `${m.id} [Reasoning]` : m.id };
+/** A price per million tokens: $0.075, $1.25, $15. */
+function formatPrice(perMillion: number): string {
+  if (perMillion === 0) return '$0';
+  const digits = perMillion < 0.1 ? 3 : 2;
+  return `$${Number(perMillion.toFixed(digits))}`;
+}
+
+/** A context size in tokens: 128K, 1M, 1.05M. */
+function formatContext(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(2))}M`;
+  return `${Math.round(tokens / 1000)}K`;
+}
+
+/**
+ * The second line of a model's row: price sent and received per million tokens and context size,
+ * where the provider reports them (OpenRouter), and whether the model is being retired.
+ */
+export function aiModelHint(m: AiModelInfo): string | undefined {
+  const parts: string[] = [];
+  if (m.prompt_price != null && m.completion_price != null) {
+    parts.push(
+      m.prompt_price === 0 && m.completion_price === 0
+        ? 'Free'
+        : `${formatPrice(m.prompt_price)} in / ${formatPrice(m.completion_price)} out per 1M tokens`,
+    );
+  }
+  if (m.context_length) parts.push(`${formatContext(m.context_length)} context`);
+  if (m.is_deprecated) parts.push('being retired');
+  return parts.length ? parts.join(', ') : undefined;
+}
+
+export function aiModelOption(m: AiModelInfo): { value: string; label: string; hint?: string } {
+  const hint = aiModelHint(m);
+  return {
+    value: m.id,
+    label: m.supports_thinking ? `${m.id} [Reasoning]` : m.id,
+    ...(hint ? { hint } : {}),
+  };
 }

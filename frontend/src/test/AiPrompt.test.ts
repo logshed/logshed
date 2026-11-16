@@ -8,7 +8,10 @@ import {
   normalizePrompt,
   getOrdinalSuffix,
   isTextModel,
+  aiModelHint,
+  aiModelOption,
 } from '../utils/aiPrompt.ts';
+import { isOpenRouterUrl } from '../utils/aiProviders.ts';
 
 describe('aiPrompt utilities', () => {
   it('buildFullEnvelope joins system instructions and user analysis prompt with headers', () => {
@@ -113,3 +116,41 @@ describe('aiPrompt utilities', () => {
   });
 });
 
+
+describe('model rows', () => {
+  it('give the price per million tokens and the context size where the provider reports them', () => {
+    const m = { id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', supports_thinking: true, context_length: 1050000, prompt_price: 0.1, completion_price: 0.5 };
+    expect(aiModelOption(m)).toEqual({
+      value: 'openai/gpt-6-luna',
+      label: 'openai/gpt-6-luna [Reasoning]',
+      hint: '$0.1 in / $0.5 out per 1M tokens, 1.05M context',
+    });
+    expect(aiModelHint({ ...m, prompt_price: 0.075, completion_price: 15, context_length: 128000 })).toBe(
+      '$0.075 in / $15 out per 1M tokens, 128K context',
+    );
+    expect(aiModelHint({ ...m, prompt_price: 0, completion_price: 0, context_length: 2000000 })).toBe('Free, 2M context');
+  });
+
+  it('leave out a price that is unknown or varies (a router) and say when a model is being retired', () => {
+    expect(aiModelHint({ id: 'openrouter/auto', name: 'Auto', prompt_price: null, completion_price: null, context_length: 2000000 })).toBe('2M context');
+    expect(aiModelHint({ id: 'z-ai/glm-5.1', name: 'GLM', is_deprecated: true })).toBe('being retired');
+  });
+
+  it('have no hint for providers that report neither (Gemini, OpenAI, Anthropic)', () => {
+    expect(aiModelOption({ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: false })).toEqual({
+      value: 'gemini-3.7-flash',
+      label: 'gemini-3.7-flash',
+    });
+  });
+});
+
+describe('isOpenRouterUrl', () => {
+  it('is true for openrouter.ai and its subdomains only, as the server decides', () => {
+    expect(isOpenRouterUrl('https://openrouter.ai/api/v1')).toBe(true);
+    expect(isOpenRouterUrl(' https://eu.OpenRouter.ai/api/v1/ ')).toBe(true);
+    expect(isOpenRouterUrl('https://notopenrouter.ai/api/v1')).toBe(false);
+    expect(isOpenRouterUrl('https://openrouter.ai.example.com/v1')).toBe(false);
+    expect(isOpenRouterUrl('')).toBe(false);
+    expect(isOpenRouterUrl('not a url')).toBe(false);
+  });
+});

@@ -241,6 +241,109 @@ describe('SettingsPanel Component', () => {
     });
   });
 
+  it('gives the model pickers a search box for every provider, short list or long', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => expect(shownValue(screen.getByLabelText('Default Primary Model'))).toMatch(/gemini-3.7-flash/i));
+
+    fireEvent.click(screen.getByLabelText('Default Primary Model'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search Default Primary Model' }), { target: { value: '2.5' } });
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'gemini-2.5-flash [Reasoning]',
+      'gemini-2.5-pro [Reasoning]',
+      'Custom model name...',
+    ]);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Add Fallback Model / }));
+    expect(screen.getByRole('combobox', { name: 'Search Add Fallback Model' })).toHaveFocus();
+  });
+
+  it('loads with OpenRouter saved as the provider: its key, model and fallbacks, and no error', async () => {
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+      ai_provider: 'openrouter',
+      ai_model: 'openai/gpt-6-luna',
+      ai_api_key: '********',
+      ai_base_url: null,
+      retention_days: 14,
+      max_retention_days: 30,
+      has_ai_api_key: true,
+      ai_providers_config: {
+        openrouter: {
+          has_api_key: true,
+          ai_api_key: '********',
+          ai_model: 'openai/gpt-6-luna',
+          ai_fallback_models: 'google/gemini-3.7-flash',
+          ai_base_url: null,
+        },
+      },
+    });
+    vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+      provider: 'openrouter',
+      models: [
+        { id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', supports_thinking: true, context_length: 1050000, prompt_price: 0.1, completion_price: 0.5 },
+        { id: 'google/gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true },
+      ],
+      has_api_key: true,
+      cached_at: null,
+      is_live: true,
+    });
+    render(<SettingsPanel />);
+
+    await waitFor(() => expect(shownValue(screen.getByLabelText('Default Primary Model'))).toBe('openai/gpt-6-luna [Reasoning]'));
+    expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenRouter');
+    expect(screen.getByText('google/gemini-3.7-flash')).toBeInTheDocument();
+    expect(screen.queryByText(/Cannot read properties/)).toBeNull();
+    expect(screen.queryByText(/API Key Required/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
+  });
+
+  it('OpenRouter has no base URL field and shows each model with its price and context size', async () => {
+    vi.spyOn(aiApi, 'getAiModels').mockImplementation(async (provider) => ({
+      provider: provider ?? 'gemini',
+      models:
+        provider === 'openrouter'
+          ? [
+              {
+                id: 'google/gemini-3.7-flash',
+                name: 'Google: Gemini 3.7 Flash',
+                supports_thinking: true,
+                context_length: 1048576,
+                prompt_price: 0.75,
+                completion_price: 3.75,
+              },
+              {
+                id: 'meta-llama/llama-4-scout:free',
+                name: 'Meta: Llama 4 Scout (free)',
+                supports_thinking: false,
+                context_length: 128000,
+                prompt_price: 0,
+                completion_price: 0,
+              },
+            ]
+          : [{ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true }],
+      has_api_key: true,
+      cached_at: null,
+      is_live: true,
+    }));
+    render(<SettingsPanel />);
+    await waitFor(() => expect(shownValue(screen.getByLabelText('Default Primary Model'))).toMatch(/gemini-3.7-flash/i));
+
+    chooseOption(screen.getByLabelText('AI Provider'), 'OpenRouter');
+    await waitFor(() => expect(aiApi.getAiModels).toHaveBeenCalledWith('openrouter', false));
+    expect(screen.queryByLabelText(/Custom Base URL/i)).toBeNull();
+    await waitFor(() => expect(shownValue(screen.getByLabelText('Default Primary Model'))).toBe('google/gemini-3.7-flash [Reasoning]'));
+
+    fireEvent.click(screen.getByLabelText('Default Primary Model'));
+    expect(screen.getByRole('option', { name: /google\/gemini-3\.7-flash/ })).toHaveTextContent(
+      '$0.75 in / $3.75 out per 1M tokens, 1.05M context',
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search Default Primary Model' }), { target: { value: 'free' } });
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'meta-llama/llama-4-scout:freeFree, 128K context',
+      'Custom model name...',
+    ]);
+  });
+
   it('renders "Keys encrypted at rest" badge, card title, and explanatory Fernet caption', async () => {
     render(<SettingsPanel />);
 
@@ -1318,7 +1421,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel onDirtyChange={onDirtyChange} />);
 
       await waitFor(() => {
-        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)');
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (Ollama, LM Studio, Groq, Mistral, ...)');
       });
 
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
@@ -1343,7 +1446,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)');
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (Ollama, LM Studio, Groq, Mistral, ...)');
       });
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
 
@@ -1357,7 +1460,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)');
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (Ollama, LM Studio, Groq, Mistral, ...)');
       });
       const keyInput = screen.getByPlaceholderText(/API key/i);
       fireEvent.change(keyInput, { target: { value: 'typed-key' } });
@@ -1372,9 +1475,9 @@ describe('SettingsPanel Component', () => {
       const baseUrl = screen.getByLabelText(/Custom Base URL/i) as HTMLInputElement;
       expect(shownValue(preset)).toBe('Custom');
 
-      chooseOption(preset, 'OpenRouter');
-      expect(baseUrl.value).toBe('https://openrouter.ai/api/v1');
-      expect(shownValue(preset)).toBe('OpenRouter');
+      chooseOption(preset, 'Mistral');
+      expect(baseUrl.value).toBe('https://api.mistral.ai/v1');
+      expect(shownValue(preset)).toBe('Mistral');
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
 
       fireEvent.change(baseUrl, { target: { value: 'https://api.groq.com/openai/v1/' } });
@@ -1382,6 +1485,22 @@ describe('SettingsPanel Component', () => {
 
       fireEvent.change(baseUrl, { target: { value: 'http://gpu-box.lan:8000/v1' } });
       expect(shownValue(preset)).toBe('Custom');
+    });
+
+    it('an OpenRouter base URL on OpenAI-Compatible keeps working and points to the OpenRouter provider', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
+      render(<SettingsPanel />);
+
+      const preset = await screen.findByRole('button', { name: /^Base URL preset / });
+      const baseUrl = screen.getByLabelText(/Custom Base URL/i) as HTMLInputElement;
+      expect(screen.queryByText(/OpenRouter is now a provider of its own/)).not.toBeInTheDocument();
+
+      fireEvent.change(baseUrl, { target: { value: 'https://openrouter.ai/api/v1' } });
+      expect(shownValue(preset)).toBe('Custom');
+      expect(screen.getByText(/OpenRouter is now a provider of its own/)).toBeInTheDocument();
+
+      fireEvent.change(baseUrl, { target: { value: 'https://notopenrouter.ai/api/v1' } });
+      expect(screen.queryByText(/OpenRouter is now a provider of its own/)).not.toBeInTheDocument();
     });
 
     it('emptying the base URL saves an empty string instead of null', async () => {

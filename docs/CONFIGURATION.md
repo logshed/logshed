@@ -168,9 +168,18 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
-| `LOGSHED_AI_TIMEOUT` | `45.0` | Web UI or Compose | Outbound HTTP request timeout in seconds for AI analysis requests to Gemini, OpenAI, Anthropic, or OpenAI-compatible endpoints such as Ollama and vLLM. | 1.1.0 |
-| `LOGSHED_AI_THINKING_LEVEL` | `low` | Web UI or Compose | How much reasoning models think before they answer: `off`, `low`, `medium` or `high`. Applies to Gemini 2.5 and later, Claude 3.7 and later, and OpenAI o-series and GPT-5 and later models; the Web UI setting (Settings > Advanced) wins over it. Claude 5 and later, Gemini 2.5 Pro and Gemini 3 and later still think a little at `off`, which asks them for their lowest level; and a model that refuses a level is asked again at `low` (or at its own default). | 1.3.0 |
+| `LOGSHED_AI_TIMEOUT` | `45.0` | Web UI or Compose | Outbound HTTP request timeout in seconds for AI analysis requests to Gemini, OpenAI, Anthropic, OpenRouter, or OpenAI-compatible endpoints such as Ollama and vLLM. | 1.1.0 |
+| `LOGSHED_AI_THINKING_LEVEL` | `low` | Web UI or Compose | How much reasoning models think before they answer: `off`, `low`, `medium` or `high`. Applies to Gemini 2.5 and later, Claude 3.7 and later, OpenAI o-series and GPT-5 and later models, and OpenRouter models that report reasoning; the Web UI setting (Settings > Advanced) wins over it. Claude 5 and later, Gemini 2.5 Pro and Gemini 3 and later still think a little at `off`, which asks them for their lowest level; and a model that refuses a level is asked again at `low` (or at its own default). | 1.3.0 |
 | `LOGSHED_AI_THINKING_BUDGET` | *(empty)* | Compose | The token budget used up to 1.2.x, still read as a level when `LOGSHED_AI_THINKING_LEVEL` is unset: `0` is `off`, up to 2,048 `low`, up to 8,192 `medium`, above that `high`. | 1.1.0 |
+
+### OpenRouter
+
+Choose **OpenRouter** in **Settings > Application** and enter an OpenRouter API key: one key reaches models from many providers. LogShed always calls `https://openrouter.ai/api/v1` (there is no base URL to set) and identifies itself to OpenRouter as `LogShed` (`https://logshed.dev`); your own LogShed address is not sent.
+
+- **Models:** the model list shows OpenRouter's chat models with their price (US dollars per million tokens sent and received, or "Free") and context size; type in the search box to find one among several hundred. Models that give images, audio or video are left out (routers such as `openrouter/auto` stay), as are the `:batch` variants, which only OpenRouter's batch API serves; models OpenRouter is retiring say "being retired". Model IDs carry the provider name, for example `google/gemini-3.7-flash` (the default).
+- **Thinking level:** sent as OpenRouter's `reasoning` setting, matched to the efforts each model lists: the level itself when listed, otherwise the nearest one. **Off** stops reasoning where the model allows it; a model that always reasons gets its lowest effort. A model typed by hand (not in the list) gets the level as asked, and nothing at **Off**.
+- **Free models and credit:** `:free` models cost nothing but have low rate limits, and some providers behind them may keep prompts. With little credit on the key, OpenRouter refuses a paid model's request (`402`) when the key cannot cover the model's longest possible answer.
+- **Moving from OpenAI-Compatible:** a setup that reaches OpenRouter through **OpenAI-Compatible** with the base URL above keeps working as before; Settings shows a note under the base URL suggesting the OpenRouter provider. To move, choose OpenRouter and enter the key there: keys are kept per provider.
 
 ### OpenAI-Compatible Providers
 
@@ -178,7 +187,6 @@ Choose **OpenAI-Compatible** in **Settings > Application** for any service or se
 
 | Provider | Base URL | Notes |
 |---|---|---|
-| OpenRouter | `https://openrouter.ai/api/v1` | One key for models from many providers. Model IDs carry the provider name, for example `meta-llama/llama-3.3-70b-instruct`. LogShed identifies itself to OpenRouter as `LogShed` (`https://logshed.dev`); your own LogShed address is not sent. |
 | Ollama | `http://host.docker.internal:11434/v1` | Ollama on the Docker host. No key needed. |
 | LM Studio | `http://host.docker.internal:1234/v1` | LM Studio's server on the Docker host. No key needed. |
 | Groq | `https://api.groq.com/openai/v1` | |
@@ -237,7 +245,7 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 
 | Feature | Where to Find in Web UI | Details |
 |---|---|---|
-| **AI Provider & API Key** | **Settings > Application** | Select provider (Google Gemini, OpenAI, Anthropic Claude or OpenAI-Compatible, see [OpenAI-Compatible Providers](#openai-compatible-providers)), enter API key, and configure primary/fallback model tags. Stored encrypted at rest. |
+| **AI Provider & API Key** | **Settings > Application** | Select provider (Google Gemini, OpenAI, Anthropic Claude, OpenRouter or OpenAI-Compatible; see [OpenRouter](#openrouter) and [OpenAI-Compatible Providers](#openai-compatible-providers)), enter API key, and configure primary/fallback model tags. Stored encrypted at rest. |
 | **Notification Targets** | **Settings > Application** | Add Apprise webhook URLs (Discord, Pushover, Gotify, Telegram, Slack, Email). URLs with sensitive tokens are masked and stored encrypted. |
 | **Active Retention Slider** | **Storage** page | Adjust the retention window for logs and alert history (1 to `MAX_RETENTION_DAYS`, default 14 days; fixed while `MAX_RETENTION_DAYS` is set). Lowering it shows what would be deleted and lets you delete now or at the next daily cleanup (at start-up and a few minutes after each midnight UTC). Logs are deleted a whole UTC day at a time, once the whole day is older than the retention, so a log can be kept up to a day longer; **Log Files** on the same page lists each day's file and when it goes. |
 | **Host Aliases** | **Settings > Sources** | Map IP addresses (e.g. `192.168.1.1`) to friendly names (`router`). Applies dynamically to log streams. Each alias and Docker host shows when it last sent a log. |

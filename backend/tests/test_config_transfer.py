@@ -264,6 +264,36 @@ class TestMoveToAnotherServer:
         assert res.status_code == 200, res.text
 
     @pytest.mark.asyncio
+    async def test_openrouter_travels_with_its_key_and_model_and_no_base_url(self, client, auth_headers, tmp_path, monkeypatch):
+        or_key = "openrouter-test-" + "key-1234"
+        res = await client.post("/api/settings", json={
+            "ai_enabled": True,
+            "ai_provider": "openrouter",
+            "ai_providers_config": {"openrouter": {
+                "ai_api_key": or_key, "ai_model": "openai/gpt-6-luna", "ai_fallback_models": "google/gemini-3.7-flash",
+            }},
+        }, headers=auth_headers)
+        assert res.status_code == 200, res.text
+        doc = await _export(client, auth_headers, include_secrets=True, password=PASSWORD, admin_password=ADMIN_PASSWORD)
+        assert doc["sections"]["settings"]["ai_providers"]["openrouter"] == {
+            "ai_model": "openai/gpt-6-luna", "ai_fallback_models": "google/gemini-3.7-flash",
+        }
+        assert or_key not in json.dumps(doc)
+
+        db_b = _use_server(tmp_path, monkeypatch, "b")
+        auth_headers = _sign_in()
+        res = await client.post(
+            "/api/config/import", json={"file": doc, "password": PASSWORD, "sections": ["settings"]}, headers=auth_headers
+        )
+        assert res.status_code == 200, res.text
+        settings = (await client.get("/api/settings", headers=auth_headers)).json()
+        assert settings["ai_provider"] == "openrouter" and settings["has_ai_api_key"] is True
+        assert settings["ai_model"] == "openai/gpt-6-luna"
+        stored = {r[0]: r[1] for r in _rows(db_b, "SELECT key, value FROM system_settings")}
+        assert decrypt_value(stored["ai_api_key_openrouter"]) == or_key
+        assert not stored.get("ai_base_url_openrouter")
+
+    @pytest.mark.asyncio
     async def test_a_wrong_password_is_refused(self, client, auth_headers, tmp_path, monkeypatch):
         await _seed(client, auth_headers)
         doc = await _export(client, auth_headers, include_secrets=True, password=PASSWORD, admin_password=ADMIN_PASSWORD)

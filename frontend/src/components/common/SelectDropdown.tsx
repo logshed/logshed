@@ -1,10 +1,14 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, X } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 import { FILTER_CLEAR_BUTTON, FILTER_CLEAR_ROOM, POPOVER_PANEL, filterTriggerClass } from './dropdownStyles.ts';
 
 export interface SelectOption {
   value: string;
   label: string;
+  /** A second, quieter line under the label in the list (not on the trigger); the search box matches it too. */
+  hint?: string;
+  /** Shown whatever is typed in the search box (an entry such as "Custom model name..."). */
+  pinned?: boolean;
 }
 
 export interface SelectDropdownProps {
@@ -32,6 +36,22 @@ export interface SelectDropdownProps {
    * text colour), so it matches the inputs beside it in its form. The list's rows take its font.
    */
   fieldClassName?: string;
+  /**
+   * Panel variant: a search box above the list, for a long list (AI models). Typed words, in any
+   * order and case, must each appear in a row's label or hint.
+   */
+  searchable?: boolean;
+}
+
+/** Whether an option is shown for a search: pinned, or every typed word in its label or hint. */
+function optionMatchesSearch(option: SelectOption, query: string): boolean {
+  if (option.pinned) return true;
+  const text = `${option.label} ${option.hint ?? ''}`.toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((word) => text.includes(word));
 }
 
 /** The panel's look without fieldClassName: the Console filter drawer's fields. */
@@ -92,6 +112,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   title,
   disabled = false,
   fieldClassName = DEFAULT_FIELD,
+  searchable = false,
 }) => {
   const baseId = useId();
   const labelId = `${baseId}-label`;
@@ -103,17 +124,26 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   const [activeIndex, setActiveIndex] = useState(0);
   const [placeAbove, setPlaceAbove] = useState(false);
   const [panelPlacement, setPanelPlacement] = useState<PanelPlacement | null>(null);
+  const [query, setQuery] = useState('');
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // The element placed on the page: the list, or with a search box the box and list together
+  const popupRef = useRef<HTMLDivElement>(null);
 
   const isPanel = variant === 'panel';
-  const selectedIndex = options.findIndex((o) => o.value === value);
-  const selectedLabel = selectedIndex >= 0 ? options[selectedIndex].label : value;
+  const hasSearch = isPanel && searchable;
+  const chosen = options.find((o) => o.value === value);
+  const selectedLabel = chosen ? chosen.label : value;
+  // The rows shown: every option, or those matching the search
+  const shown = hasSearch && query.trim() ? options.filter((o) => optionMatchesSearch(o, query)) : options;
+  const selectedIndex = shown.findIndex((o) => o.value === value);
   const showClear = active && Boolean(onClear);
 
   const open = () => {
     if (disabled) return;
-    setActiveIndex(Math.max(0, selectedIndex));
+    setQuery('');
+    setActiveIndex(Math.max(0, options.findIndex((o) => o.value === value)));
     setPlaceAbove(false);
     setPanelPlacement(null);
     setIsOpen(true);
@@ -121,11 +151,12 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
 
   // Panel variant: below the trigger, or above it when the list does not fit below and there is more room above
   const placePanelList = () => {
-    if (!triggerRef.current || !listRef.current) return;
+    const popup = popupRef.current ?? listRef.current;
+    if (!triggerRef.current || !popup) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const roomBelow = window.innerHeight - rect.bottom - 4 - VIEWPORT_MARGIN;
     const roomAbove = rect.top - 4 - VIEWPORT_MARGIN;
-    const height = Math.min(LIST_MAX_HEIGHT, listRef.current.scrollHeight);
+    const height = Math.min(LIST_MAX_HEIGHT, popup.scrollHeight);
     const above = height > roomBelow && roomAbove > roomBelow;
     const maxHeight = Math.max(0, Math.min(LIST_MAX_HEIGHT, above ? roomAbove : roomBelow));
     setPanelPlacement(
@@ -141,7 +172,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   };
 
   const choose = (index: number) => {
-    const option = options[index];
+    const option = shown[index];
     if (option && option.value !== value) onChange(option.value);
     close();
   };
@@ -152,7 +183,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     if (isPanel) {
       // Placed before the browser paints, so it never shows where it first rendered
       placePanelList();
-      listRef.current.focus({ preventScroll: true });
+      (searchRef.current ?? listRef.current).focus({ preventScroll: true });
       return;
     }
     listRef.current.focus();
@@ -167,7 +198,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     if (!isOpen || !isPanel) return;
     let frame: number | null = null;
     const follow = (e: Event) => {
-      if (e.target === listRef.current || frame !== null) return;
+      if (e.target === listRef.current || e.target === searchRef.current || frame !== null) return;
       frame = window.requestAnimationFrame(() => {
         frame = null;
         placePanelList();
@@ -212,8 +243,11 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     }
   };
 
-  const handleListKeyDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
-    const last = options.length - 1;
+  const handleListKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    const last = shown.length - 1;
+    // In the search box, Home, End, Space and letters edit the text
+    const inSearch = e.currentTarget === searchRef.current;
+    if (inSearch && ['Home', 'End', ' '].includes(e.key)) return;
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -236,7 +270,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       case 'Enter':
       case ' ':
         e.preventDefault();
-        choose(activeIndex);
+        if (shown.length > 0) choose(activeIndex);
         return;
       case 'Tab':
         // Closes without choosing; focus is back on the trigger before the browser moves it on
@@ -244,11 +278,11 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         triggerRef.current?.focus();
         return;
     }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (!inSearch && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const letter = e.key.toLowerCase();
-      for (let step = 1; step <= options.length; step++) {
-        const index = (activeIndex + step) % options.length;
-        if (options[index].label.toLowerCase().startsWith(letter)) {
+      for (let step = 1; step <= shown.length; step++) {
+        const index = (activeIndex + step) % shown.length;
+        if (shown[index].label.toLowerCase().startsWith(letter)) {
           setActiveIndex(index);
           break;
         }
@@ -295,7 +329,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   );
 
   const rowFont = !isPanel || fieldClassName.split(' ').includes('font-mono') ? 'font-mono' : '';
-  const rows = options.map((option, index) => {
+  const rows = shown.map((option, index) => {
     const isChosen = index === selectedIndex;
     const isActive = index === activeIndex;
     return (
@@ -313,7 +347,12 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         }`}
       >
         {/* A long row (an AI model name) wraps in the panel's fixed width rather than running past it */}
-        <span className={isPanel ? 'min-w-0 wrap-break-word' : 'whitespace-nowrap'}>{option.label}</span>
+        <span className={isPanel ? 'min-w-0 wrap-break-word' : 'whitespace-nowrap'}>
+          {option.label}
+          {option.hint && (
+            <span className={`block text-[11px] font-normal ${isChosen ? 'text-accent-300' : 'text-fg-muted'}`}>{option.hint}</span>
+          )}
+        </span>
         <Check aria-hidden="true" className={`w-3 h-3 shrink-0 ${isChosen ? 'text-accent-400' : 'invisible'}`} />
       </li>
     );
@@ -326,7 +365,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     role: 'listbox',
     tabIndex: -1,
     'aria-labelledby': labelledBy ?? labelId,
-    'aria-activedescendant': optionId(activeIndex),
+    'aria-activedescendant': shown.length > 0 ? optionId(activeIndex) : undefined,
     onKeyDown: handleListKeyDown,
     'data-no-pull-refresh': true,
   } as const;
@@ -349,7 +388,55 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     </>
   );
 
-  const panelList = isOpen && isPanel && (
+  const searchPopup = isOpen && hasSearch && (
+    <>
+      <div data-testid="select-dropdown-backdrop" className="fixed inset-0 z-9998 bg-transparent" onClick={closeOnBackdrop} />
+      <div
+        ref={popupRef}
+        data-no-pull-refresh
+        style={{
+          position: 'fixed',
+          top: panelPlacement?.top,
+          bottom: panelPlacement?.bottom,
+          left: panelPlacement?.left ?? 0,
+          width: panelPlacement?.width,
+          maxHeight: panelPlacement?.maxHeight ?? LIST_MAX_HEIGHT,
+        }}
+        className={`flex flex-col z-9999 ${POPOVER_PANEL}`}
+      >
+        <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-line-subtle shrink-0">
+          <Search aria-hidden="true" className="w-3.5 h-3.5 text-fg-muted shrink-0" />
+          {/* A combobox box inside the popup: the list below keeps its listbox role and active row */}
+          <input
+            ref={searchRef}
+            type="text"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-autocomplete="list"
+            aria-activedescendant={shown.length > 0 ? optionId(activeIndex) : undefined}
+            aria-label={`Search ${label}`}
+            placeholder="Search..."
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setActiveIndex(0);
+            }}
+            onKeyDown={handleListKeyDown}
+            className="flex-1 min-w-0 bg-transparent text-xs text-fg placeholder:text-fg-subtle outline-hidden"
+          />
+        </div>
+        <ul {...listProps} className="flex-1 min-h-0 overflow-y-auto outline-hidden">
+          {rows}
+        </ul>
+        {shown.length === 0 && <p className="px-3 py-2 text-xs text-fg-muted">Nothing matches "{query.trim()}".</p>}
+      </div>
+    </>
+  );
+
+  const panelList = isOpen && isPanel && !hasSearch && (
     <>
       <div data-testid="select-dropdown-backdrop" className="fixed inset-0 z-9998 bg-transparent" onClick={closeOnBackdrop} />
       <ul
@@ -413,6 +500,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         <div className="relative flex-1 min-w-0">
           {trigger}
           {panelList}
+          {searchPopup}
         </div>
         {clearButton}
       </div>

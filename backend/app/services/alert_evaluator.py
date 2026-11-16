@@ -775,6 +775,7 @@ class AlertEvaluator:
                 fallback_models=fallback_models,
                 timeout=provider_settings["ai_timeout"],
                 thinking_level=provider_settings["ai_thinking_level"],
+                model_params=provider_settings["model_params"],
             )
             ai.model = ai_result.model_used
             if ai_result.fallback_attempts:

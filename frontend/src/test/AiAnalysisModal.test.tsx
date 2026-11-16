@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AiAnalysisModal, MAX_USER_CONTEXT_LENGTH } from '../components/ai/AiAnalysisModal.tsx';
 import { LogEntry } from '../types.ts';
 import * as aiApi from '../api/ai.ts';
+import * as settingsApi from '../api/settings.ts';
 import * as clipboardUtil from '../utils/clipboard.ts';
 import { chooseOption, optionLabels, shownValue } from './selectDropdownHelpers.ts';
 
@@ -881,7 +882,8 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       'Google Gemini',
       'OpenAI',
       'Anthropic Claude',
-      'OpenAI-Compatible (OpenRouter, Ollama, ...)',
+      'OpenAI-Compatible (Ollama, LM Studio, ...)',
+      'OpenRouter',
     ]);
 
     // Switch to OpenAI
@@ -897,6 +899,36 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     await waitFor(() => {
       expect(aiApi.getAiModels).toHaveBeenCalledWith('anthropic');
     });
+  });
+
+  it('switching to OpenRouter takes its saved model and key from the settings', async () => {
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+      ai_provider: 'gemini',
+      ai_model: 'gemini-3.7-flash',
+      retention_days: 14,
+      has_ai_api_key: true,
+      ai_providers_config: {
+        openrouter: { has_api_key: true, ai_api_key: '********', ai_model: 'openai/gpt-6-luna', ai_fallback_models: '', ai_base_url: null },
+      },
+    } as never);
+    vi.spyOn(aiApi, 'getAiModels').mockImplementation(async (provider) => ({
+      provider: provider ?? 'gemini',
+      models:
+        provider === 'openrouter'
+          ? [{ id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', supports_thinking: true, prompt_price: 0.1, completion_price: 0.5 }]
+          : [{ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true }],
+      has_api_key: true,
+      cached_at: null,
+      is_live: true,
+    }));
+    render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+    await screen.findByPlaceholderText('Redacted prompt...');
+    fireEvent.click(screen.getByRole('button', { name: /Model & Provider Settings/i }));
+
+    chooseOption(modelDropdown('AI Provider'), 'OpenRouter');
+    await waitFor(() => expect(aiApi.getAiModels).toHaveBeenCalledWith('openrouter'));
+    await waitFor(() => expect(shownValue(modelDropdown('Primary Model'))).toBe('openai/gpt-6-luna [Reasoning]'));
+    expect(screen.queryByText(/Cannot read properties/)).toBeNull();
   });
 
   describe('stale runs and follow-up streaming', () => {

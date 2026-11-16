@@ -3322,6 +3322,7 @@ class TestAiProviderDispatch:
             ("openai", "call_openai"),
             ("openai_compatible", "call_openai"),
             ("anthropic", "call_anthropic"),
+            ("openrouter", "call_openai"),
         ],
     )
     async def test_every_provider_receives_the_thinking_level(self, provider, dispatch_name):

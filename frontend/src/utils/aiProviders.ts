@@ -5,7 +5,7 @@
  * here: they are fetched live from each provider.
  */
 
-export type AiProviderId = 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
+export type AiProviderId = 'gemini' | 'openai' | 'anthropic' | 'openai_compatible' | 'openrouter';
 
 export interface AiProviderEntry {
   id: AiProviderId;
@@ -30,7 +30,15 @@ export const AI_PROVIDERS: AiProviderEntry[] = [
     needsApiKey: false,
     defaultModel: 'llama3.2',
     customBaseUrl: true,
-    examples: ['OpenRouter', 'Ollama', 'LM Studio', 'Groq'],
+    examples: ['Ollama', 'LM Studio', 'Groq', 'Mistral'],
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    needsApiKey: true,
+    defaultModel: 'google/gemini-3.7-flash',
+    customBaseUrl: false,
+    examples: [],
   },
 ];
 
@@ -44,6 +52,16 @@ export function getAiProvider(id: string | null | undefined): AiProviderEntry | 
 /** Whether calls to this provider need an API key. Unknown ids count as needing one. */
 export function providerNeedsApiKey(id: string | null | undefined): boolean {
   return getAiProvider(id)?.needsApiKey ?? true;
+}
+
+/** Whether a base URL is OpenRouter's (openrouter.ai or a subdomain), as the server decides it. */
+export function isOpenRouterUrl(baseUrl: string | null | undefined): boolean {
+  try {
+    const host = new URL((baseUrl ?? '').trim()).hostname.toLowerCase();
+    return host === 'openrouter.ai' || host.endsWith('.openrouter.ai');
+  } catch {
+    return false;
+  }
 }
 
 /** The provider picker's options; maxExamples limits the services named after a label. */

@@ -400,6 +400,11 @@ export interface AiModelInfo {
   description?: string | null;
   supports_thinking?: boolean;
   is_deprecated?: boolean;
+  /** OpenRouter: the most tokens a request and its answer can hold. */
+  context_length?: number | null;
+  /** OpenRouter: US dollars per million tokens sent and received; null when unknown or variable. */
+  prompt_price?: number | null;
+  completion_price?: number | null;
 }
 
 export interface AiModelsResponse {

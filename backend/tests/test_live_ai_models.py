@@ -16,7 +16,7 @@ def load_env_keys():
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 keys[k.strip()] = v.strip().strip("'\"")
-    for k in ("OPENAI_API_KEY", "GEMINI_API_KEY", "CLAUDE_API_KEY", "ANTHROPIC_API_KEY"):
+    for k in ("OPENAI_API_KEY", "GEMINI_API_KEY", "CLAUDE_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_KEY"):
         if k in os.environ:
             keys[k] = os.environ[k]
     return keys
@@ -201,3 +201,114 @@ async def test_live_thinking_off_runs_an_analysis(provider, key_name, model, cap
     assert summary.strip()
     assert model_used == model
     assert fallback_attempts == []
+
+
+async def _openrouter_models(api_key: str) -> list[dict]:
+    """OpenRouter's model list as LogShed keeps it (listing models is free)."""
+    return await fetch_available_models("openrouter", api_key=api_key)
+
+
+@pytest.mark.asyncio
+async def test_live_openrouter_models():
+    """The live list holds chat models only, with prices, context sizes and reasoning settings."""
+    api_key = load_env_keys().get("OPENROUTER_KEY")
+    if not api_key:
+        pytest.skip("OPENROUTER_KEY not configured in .env or environment")
+    models = await _openrouter_models(api_key)
+    by_id = {m["id"]: m for m in models}
+    print(f"\n--- OPENROUTER: {len(models)} models kept ---")
+    assert len(models) > 100
+    assert not any(m["id"].endswith(":batch") for m in models)
+    default = by_id["google/gemini-3.7-flash"]
+    assert default["context_length"] and default["prompt_price"] is not None
+    assert default["params"]["reasoning_efforts"]
+
+
+@pytest.mark.asyncio
+# Free models only, so the maintainer's free-tier key can run these (2026-11-16, no end date):
+# particle-1 can stop reasoning (off is none); ernie-5.5-flash-preview always reasons and lists only
+# high, so off asks for high, the nearest effort it lists. (inkling-2-small, also free, refused with
+# 403 "not available in your region" on 2026-11-16.)
+@pytest.mark.parametrize(
+    "model, thinking_level, effort",
+    [
+        ("particle-ai/particle-1:free", "off", "none"),
+        ("particle-ai/particle-1:free", "high", "high"),
+        ("baidu/ernie-5.5-flash-preview:free", "off", "high"),
+    ],
+)
+async def test_live_openrouter_runs_an_analysis(model, thinking_level, effort, caplog):
+    """An analysis through OpenRouter with the reasoning setting from its model list, with no retry needed."""
+    import logging
+
+    from app.services.ai_engine import execute_ai_analysis, model_params_by_id
+
+    api_key = load_env_keys().get("OPENROUTER_KEY")
+    if not api_key:
+        pytest.skip("OPENROUTER_KEY not configured in .env or environment")
+    import json
+
+    from app.services.ai_engine import _openai_sampling_kwargs
+
+    params = model_params_by_id(json.dumps(await _openrouter_models(api_key)))
+    assert model in params
+    assert _openai_sampling_kwargs(model, thinking_level, params)["extra_body"]["reasoning"]["effort"] == effort
+    with caplog.at_level(logging.INFO, logger="app.services.ai_engine"):
+        result = await execute_ai_analysis(
+            provider="openrouter",
+            model=model,
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            source_alias="nas-01",
+            app_name="smartd",
+            redacted_logs="2026-11-16T10:00:00Z nas-01 smartd: Device /dev/sda, 8 Currently unreadable (pending) sectors",
+            log_count=1,
+            timeout=120,
+            thinking_level=thinking_level,
+            model_params=params,
+        )
+    retries = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
+    print(
+        f"\n{model} {thinking_level}: in {result.tokens_in}, out {result.tokens_out}, thinking {result.tokens_thoughts}, "
+        f"retries {retries}: {result.summary[:160]!r}"
+    )
+    assert result.summary.strip()
+    assert result.fallback_attempts == []
+    assert retries == []
+
+
+@pytest.mark.asyncio
+async def test_live_openrouter_streams_a_follow_up():
+    """A follow-up question streams its answer through OpenRouter (a free model)."""
+    import json
+
+    from app.services.ai_engine import execute_ai_follow_up, model_params_by_id
+
+    api_key = load_env_keys().get("OPENROUTER_KEY")
+    if not api_key:
+        pytest.skip("OPENROUTER_KEY not configured in .env or environment")
+    params = model_params_by_id(json.dumps(await _openrouter_models(api_key)))
+    deltas: list[str] = []
+
+    async def on_progress(event):
+        if event.get("stage") == "delta":
+            deltas.append(event["content"])
+
+    reply, tokens_in, tokens_out, _thoughts, _used, model_used, _attempts = await execute_ai_follow_up(
+        provider="openrouter",
+        model="particle-ai/particle-1:free",
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        messages=[
+            {"role": "user", "content": "nas-01 smartd: Device /dev/sda, 8 Currently unreadable (pending) sectors"},
+            {"role": "assistant", "content": "## Summary\nThe disk /dev/sda has unreadable sectors."},
+            {"role": "user", "content": "Which one command shows the disk's SMART attributes? Answer in one line."},
+        ],
+        timeout=120,
+        thinking_level="low",
+        on_progress=on_progress,
+        model_params=params,
+    )
+    print(f"\nfollow-up: in {tokens_in}, out {tokens_out}, {len(deltas)} chunks: {reply[:160]!r}")
+    assert reply.strip() and len(deltas) >= 1
+    assert model_used == "particle-ai/particle-1:free"

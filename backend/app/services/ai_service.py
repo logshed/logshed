@@ -19,7 +19,9 @@ from fastapi import HTTPException, status
 from app.api.deps import run_db_query
 from app.core.ai_providers import (
     default_model_for,
+    get_ai_provider,
     normalize_provider_id,
+    provider_base_url,
     provider_needs_api_key,
     stored_provider_setting,
 )
@@ -43,6 +45,7 @@ from app.services.ai_engine import (
     DEFAULT_SYSTEM_PROMPT,
     build_analysis_prompt,
     format_prompt_log_line,
+    model_params_by_id,
     truncate_logs_to_budget,
 )
 
@@ -168,7 +171,7 @@ def resolve_ai_provider_settings(
 
     model = model_override or stored("ai_model") or default_model_for(provider)
     api_key = stored("ai_api_key")
-    base_url = stored("ai_base_url") or None
+    base_url = provider_base_url(provider, stored("ai_base_url"))
 
     fallback_models_str = stored("ai_fallback_models")
     configured_fallbacks = [m.strip() for m in fallback_models_str.split(",") if m.strip()]
@@ -180,6 +183,14 @@ def resolve_ai_provider_settings(
 
     ai_enabled = is_ai_enabled(settings, provider, api_key)
 
+    # OpenRouter: what each model accepts, from the cached model list
+    entry = get_ai_provider(provider)
+    model_params = (
+        model_params_by_id(settings.get(f"ai_models_cache_{provider}"))
+        if entry is not None and entry.model_params_from_list
+        else None
+    )
+
     return {
         "provider": provider,
         "model": model,
@@ -190,6 +201,7 @@ def resolve_ai_provider_settings(
         "ai_thinking_level": get_cached_setting("ai_thinking_level", DEFAULT_AI_THINKING_LEVEL),
         "ai_enabled": ai_enabled,
         "has_ai_api_key": bool(api_key.strip()),
+        "model_params": model_params,
     }
 
 

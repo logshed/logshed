@@ -791,6 +791,11 @@ class AiModelInfo(BaseModel):
     description: Optional[str] = None
     supports_thinking: bool = False
     is_deprecated: bool = False
+    # Reported by OpenRouter only: the most tokens a request and its answer can hold, and US
+    # dollars per million tokens sent and received (None when unknown or variable)
+    context_length: Optional[int] = None
+    prompt_price: Optional[float] = None
+    completion_price: Optional[float] = None
 
 
 class AiModelsResponse(BaseModel):

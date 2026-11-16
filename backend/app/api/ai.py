@@ -10,7 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user, run_db_query
-from app.core.ai_providers import AI_PROVIDERS, get_ai_provider, normalize_provider_id, stored_provider_setting
+from app.core.ai_providers import (
+    AI_PROVIDERS,
+    get_ai_provider,
+    normalize_provider_id,
+    provider_base_url,
+    provider_has_fixed_base_url,
+    stored_provider_setting,
+)
 from app.core.config import is_debug_or_dev
 from app.core.rate_limiter import ai_rate_limiter
 from app.core.redactor import redact
@@ -237,8 +244,13 @@ async def refresh_available_models(
     active_db_provider = normalize_provider_id(stored_settings.get("ai_provider"))
     clean_provider = (provider or active_db_provider).lower()
 
-    stored_base_url = stored_provider_setting(stored_settings, clean_provider, "ai_base_url", active_db_provider) or None
+    stored_base_url = provider_base_url(
+        clean_provider, stored_provider_setting(stored_settings, clean_provider, "ai_base_url", active_db_provider)
+    )
     payload_base_url = payload.base_url.strip() if payload and payload.base_url and payload.base_url.strip() else None
+    if provider_has_fixed_base_url(clean_provider):
+        # A provider with its own address is called there whatever the request names.
+        payload_base_url = None
     # The stored key belongs to the stored endpoint: never send it to a different host.
     foreign_base_url = payload_base_url is not None and payload_base_url.rstrip("/") != (stored_base_url or "").strip().rstrip("/")
 
@@ -408,6 +420,7 @@ async def _run_diagnosis(ctx: dict, on_progress=None) -> AiDiagnosisResponse:
         prompt_override=ctx["redacted_prompt_override"],
         system_prompt=ctx["system_prompt"],
         fallback_models=ctx["fallback_models"],
+        model_params=ctx.get("model_params"),
         on_progress=on_progress,
         timeout=ctx.get("ai_timeout", 45.0),
         thinking_level=ctx.get("ai_thinking_level"),
@@ -584,6 +597,7 @@ async def _run_follow_up(audit_id: int, ctx: dict, on_progress=None) -> AiFollow
         timeout=ctx["ai_timeout"],
         thinking_level=ctx["ai_thinking_level"],
         on_progress=on_progress,
+        model_params=ctx.get("model_params"),
     )
 
     message, turn_count = await save_follow_up_exchange(

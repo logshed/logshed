@@ -2,7 +2,7 @@
 The AI providers LogShed can call: one entry per provider.
 
 Everything that differs between providers as data lives here (label, SDK, whether a key is
-needed, default model). The code each SDK needs (requests, streaming, model
+needed, default model, a fixed API address). The code each SDK needs (requests, streaming, model
 discovery) lives in `services/ai_engine.py`, keyed by the entry's `sdk`. The web UI keeps the
 same list in `frontend/src/utils/aiProviders.ts`, and `test_frontend_limits.py` keeps the two
 in step.
@@ -22,6 +22,12 @@ class AiProvider:
     needs_api_key: bool
     # The model used when none is chosen
     default_model: str
+    # The provider's own API address, used whatever base URL is stored. None: the SDK's default,
+    # or the stored base URL for servers the user names (OpenAI-Compatible).
+    base_url: Optional[str] = None
+    # True for OpenRouter: its model list says what each model accepts (reasoning efforts,
+    # temperature), and requests set reasoning with its own `reasoning` parameter.
+    model_params_from_list: bool = False
 
 
 AI_PROVIDERS: dict[str, AiProvider] = {
@@ -31,6 +37,15 @@ AI_PROVIDERS: dict[str, AiProvider] = {
         AiProvider(id="openai", label="OpenAI", sdk="openai", needs_api_key=True, default_model="gpt-6.1-sol"),
         AiProvider(id="anthropic", label="Anthropic Claude", sdk="anthropic", needs_api_key=True, default_model="claude-sonnet-5-5"),
         AiProvider(id="openai_compatible", label="OpenAI-Compatible", sdk="openai", needs_api_key=False, default_model="llama3.2"),
+        AiProvider(
+            id="openrouter",
+            label="OpenRouter",
+            sdk="openai",
+            needs_api_key=True,
+            default_model="google/gemini-3.7-flash",
+            base_url="https://openrouter.ai/api/v1",
+            model_params_from_list=True,
+        ),
     )
 }
 
@@ -60,6 +75,23 @@ def provider_needs_api_key(provider_id: str) -> bool:
     """Whether calls to this provider need an API key. Unknown ids count as needing one."""
     entry = get_ai_provider(provider_id)
     return entry.needs_api_key if entry else True
+
+
+def provider_has_fixed_base_url(provider_id: str) -> bool:
+    """Whether the provider is always called at its own address, so no base URL is stored for it."""
+    entry = get_ai_provider(provider_id)
+    return bool(entry and entry.base_url)
+
+
+def provider_base_url(provider_id: str, stored_base_url: Optional[str]) -> Optional[str]:
+    """
+    The base URL calls to a provider go to: its fixed address when it has one, so a stored key is
+    never sent elsewhere, otherwise the stored base URL (None when unset).
+    """
+    entry = get_ai_provider(provider_id)
+    if entry and entry.base_url:
+        return entry.base_url
+    return stored_base_url or None
 
 
 def stored_provider_setting(

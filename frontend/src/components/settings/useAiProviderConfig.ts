@@ -3,7 +3,7 @@ import { AiModelInfo } from '../../types.ts';
 import { SettingsResponseData, MASKED_SECRET } from '../../api/settings.ts';
 import { getAiModels } from '../../api/ai.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, normalizePrompt } from '../../utils/aiPrompt.ts';
-import { DEFAULT_AI_PROVIDER, providerNeedsApiKey, type AiProviderId } from '../../utils/aiProviders.ts';
+import { AI_PROVIDERS, DEFAULT_AI_PROVIDER, providerNeedsApiKey, type AiProviderId } from '../../utils/aiProviders.ts';
 import { parseFallbackModels, promoteFirstFallback as swapFirstFallback } from '../../utils/modelChain.ts';
 
 export interface ProviderLocalState {
@@ -14,12 +14,11 @@ export interface ProviderLocalState {
   baseUrl: string;
 }
 
-const defaultProviderStates = (): Record<string, ProviderLocalState> => ({
-  gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
-  openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
-  anthropic: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '', baseUrl: '' },
-  openai_compatible: { apiKey: '', hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '', baseUrl: '' },
-});
+// One entry per provider in the registry; a provider that needs no key counts as having one
+const defaultProviderStates = (): Record<string, ProviderLocalState> =>
+  Object.fromEntries(
+    AI_PROVIDERS.map((p) => [p.id, { apiKey: '', hasKey: !p.needsApiKey, model: p.defaultModel, fallbackModels: '', baseUrl: '' }]),
+  );
 
 /**
  * Builds the per-provider form state from a settings response. The same function produces the

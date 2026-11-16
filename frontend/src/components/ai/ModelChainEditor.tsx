@@ -164,10 +164,11 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                 variant="panel"
                 fieldClassName={`bg-canvas border-line rounded-sm ${s.field} font-mono text-fg`}
                 label="Add Fallback Model"
+                searchable
                 options={[
-                  { value: '', label: '-- Add Fallback Model --' },
+                  { value: '', label: '-- Add Fallback Model --', pinned: true },
                   ...availableModels.filter((m) => m.id !== primaryModel && !fallbacks.includes(m.id)).map(aiModelOption),
-                  { value: '__custom_fallback__', label: 'Custom fallback model...' },
+                  { value: '__custom_fallback__', label: 'Custom fallback model...', pinned: true },
                 ]}
                 value={selectedToAdd}
                 onChange={(v) => {
