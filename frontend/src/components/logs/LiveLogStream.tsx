@@ -785,7 +785,13 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               </button>
             </div>
             {resizableHeading('time', 'TIMESTAMP', 'Timestamp')}
-            <div>SEV</div>
+            {/* A fixed width, so no handle: the same line as the resizable headings', drawn where theirs is */}
+            <div className="relative self-stretch flex items-center min-w-0 pr-3">
+              <span>SEV</span>
+              <span aria-hidden="true" className="absolute right-0 top-0 bottom-0 flex w-3 justify-center">
+                <span className="w-px bg-line" />
+              </span>
+            </div>
             {resizableHeading('host', 'HOST / IP', 'Host')}
             {resizableHeading('app', 'APP / CONTAINER', 'App')}
             <div className="flex min-w-0 items-center justify-between gap-2 pl-2">
