@@ -401,6 +401,103 @@ class TestSystemMetricsUdpReceiveErrors:
             monitor.reset()
 
 
+class TestSystemMetricsSourcesAndBackup:
+    """The configured sources' last-seen times and the newest backup, for the Home Assistant integration."""
+
+    @staticmethod
+    def _seed_sources(db_path: Path) -> None:
+        with open_db(db_path) as conn:
+            conn.executemany(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                [("10.0.0.5", "nas"), ("10.0.0.9", "printer"), ("docker", "containers")],
+            )
+            conn.execute(
+                "INSERT INTO docker_endpoints (name, url, source_alias, enabled, created_at, updated_at) "
+                "VALUES ('Media server', 'tcp://10.0.0.20:2375', 'media', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+            conn.execute(
+                "INSERT INTO docker_endpoints (name, url, source_alias, enabled, created_at, updated_at) "
+                "VALUES ('Old box', 'tcp://10.0.0.30:2375', 'old', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+            conn.commit()
+
+    @pytest.mark.asyncio
+    async def test_sources_list_aliases_and_enabled_docker_hosts_with_last_seen(
+        self, client: AsyncClient, full_token_headers: dict, tmp_path: Path
+    ):
+        from app.core.day_files import KIND_DOCKER, KIND_SYSLOG
+        from app.services.source_activity import get_source_activity, us_to_iso
+
+        self._seed_sources(tmp_path / "logs.db")
+        activity = get_source_activity()
+        activity.note([{"source_ip": "10.0.0.5", "source_kind": KIND_SYSLOG}], now_us=2_000_000)
+        # Container logs from an alias's address belong to the Docker host, not the alias
+        activity.note([{"source_ip": "10.0.0.5", "source_kind": KIND_DOCKER}], now_us=9_000_000)
+        activity.note([{"source_ip": "10.0.0.20", "source_kind": KIND_DOCKER}], now_us=5_000_000)
+
+        data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
+        by_name = {s["name"]: s for s in data["sources"]}
+        # The "docker" alias row names container logs, it is not an address; a disabled host is left out
+        assert set(by_name) == {"nas", "printer", "Primary Docker", "Media server"}
+        assert by_name["nas"] == {
+            "name": "nas", "kind": "alias", "address": "10.0.0.5", "last_seen": us_to_iso(2_000_000)
+        }
+        assert by_name["printer"]["last_seen"] is None
+        assert by_name["Media server"] == {
+            "name": "Media server", "kind": "docker", "address": "10.0.0.20", "last_seen": us_to_iso(5_000_000)
+        }
+        assert by_name["Primary Docker"]["address"] == "docker"
+
+    @pytest.mark.asyncio
+    async def test_primary_docker_host_left_out_when_env_turns_it_off(
+        self, client: AsyncClient, full_token_headers: dict, monkeypatch
+    ):
+        monkeypatch.setenv("ENABLE_DOCKER", "false")
+        data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
+        assert data["sources"] == []
+
+    @pytest.mark.asyncio
+    async def test_last_backup_is_the_newest_archive(
+        self, client: AsyncClient, full_token_headers: dict, tmp_path: Path
+    ):
+        data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
+        assert "last_backup" in data and data["last_backup"] is None
+
+        folder = tmp_path / "backups"
+        folder.mkdir()
+        (folder / "logshed-backup-pre-v3-to-v4-20261101T020304Z.tar.gz").write_bytes(b"x" * 10)
+        (folder / "logshed-backup-manual-v4-20261110T080000Z.tar.gz").write_bytes(b"x" * 1234)
+        (folder / "logshed-backup-manual-v4-20261120T080000Z.tar.gz.part").write_bytes(b"x" * 99)
+
+        data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
+        assert data["last_backup"] == {"created_at": "2026-11-10T08:00:00+00:00", "size_bytes": 1234}
+
+    @pytest.mark.asyncio
+    async def test_unreadable_backups_folder_leaves_last_backup_empty(
+        self, client: AsyncClient, full_token_headers: dict, tmp_path: Path
+    ):
+        folder = tmp_path / "backups"
+        folder.mkdir()
+        (folder / "logshed-backup-manual-v4-20261110T080000Z.tar.gz").write_bytes(b"x")
+        folder.chmod(0)
+        try:
+            res = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+        finally:
+            folder.chmod(0o755)
+        assert res.status_code == 200
+        assert res.json()["last_backup"] is None
+
+    @pytest.mark.asyncio
+    async def test_mcp_system_metrics_include_sources_and_last_backup(self, tmp_path: Path):
+        from app.mcp.server import McpAccess, create_mcp_server, mcp_access_context
+
+        self._seed_sources(tmp_path / "logs.db")
+        with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
+            metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
+        assert {s["name"] for s in metrics["sources"]} == {"nas", "printer", "Primary Docker", "Media server"}
+        assert metrics["last_backup"] is None
+
+
 class TestSystemVersionApi:
     """Tests for GET /api/v1/system/version."""
 

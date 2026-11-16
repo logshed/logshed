@@ -1,17 +1,21 @@
 """
 The system metrics of REST v1 (``GET /api/v1/system/metrics``, read by the Home Assistant integration)
 and MCP (``get_system_metrics``): log rates, error counts and top offenders, alert and maintenance
-state, and storage figures.
+state, storage figures, when each configured source last sent a log, and the newest backup.
 """
 
 import asyncio
 import datetime
+import logging
 import threading
 import time
 from typing import Any, Optional
 
 from app.api.deps import run_db_query
-from app.core.config import get_db_path
+from app.collectors.docker_collector import effective_source_ip
+from app.core.backup import backups_dir, list_backups
+from app.core.config import env_docker_disabled, get_db_path
+from app.core.day_files import KIND_DOCKER
 from app.core.pipeline import (
     get_dropped_by_filter_count,
     get_dropped_count,
@@ -19,7 +23,9 @@ from app.core.pipeline import (
     get_queue,
 )
 from app.models import (
+    LastBackup,
     SeverityCounts24h,
+    SourceLastSeen,
     SystemAlertState,
     SystemMaintenanceMetrics,
     SystemMetricsResponse,
@@ -27,9 +33,13 @@ from app.models import (
     TopErrorEntity,
 )
 from app.services import log_store
+from app.services.docker_endpoints import load_docker_endpoints
+from app.services.source_activity import get_source_activity, us_to_iso
 from app.services.maintenance_service import get_maintenance_status
 from app.services.storage_metrics import get_cached_storage_metrics
 from app.version import APP_VERSION
+
+logger = logging.getLogger(__name__)
 
 # Telemetry error stats in-memory cache (12-second TTL)
 _cached_error_stats: Optional[dict[str, Any]] = None
@@ -145,7 +155,21 @@ async def get_system_metrics() -> SystemMetricsResponse:
         # Maintenance status
         maint_status = get_maintenance_status(conn)
 
-        return instance_id, server_name, recent_active, recent_count, last_trig, last_rule, maint_status
+        # Configured sources ("docker" is the alias of the first Docker host's containers, not an address)
+        aliases = [
+            (r["ip"], r["alias"])
+            for r in cur.execute("SELECT ip, alias FROM host_aliases WHERE ip != 'docker' ORDER BY ip").fetchall()
+        ]
+        docker_hosts = [
+            (effective_source_ip(r["url"], r["source_alias"], r["id"]), r["name"])
+            for r in load_docker_endpoints(conn, enabled_only=True)
+            if not (r["id"] == 1 and env_docker_disabled())
+        ]
+
+        return (
+            instance_id, server_name, recent_active, recent_count, last_trig, last_rule, maint_status,
+            aliases, docker_hosts,
+        )
 
     (
         instance_id,
@@ -155,7 +179,11 @@ async def get_system_metrics() -> SystemMetricsResponse:
         alert_last_trig,
         alert_last_rule,
         maint_status,
+        aliases,
+        docker_hosts,
     ) = await run_db_query(_fetch_system_info)
+    sources = _sources_last_seen(aliases, docker_hosts)
+    last_backup = await asyncio.to_thread(_newest_backup, db_path)
 
     # Storage metrics
     storage_info = await asyncio.to_thread(get_cached_storage_metrics, db_path)
@@ -205,4 +233,43 @@ async def get_system_metrics() -> SystemMetricsResponse:
         ),
         udp_receive_errors=get_udp_receive_errors(),
         **get_loop_lag(),
+        sources=sources,
+        last_backup=last_backup,
     )
+
+
+def _sources_last_seen(
+    aliases: list[tuple[str, str]], docker_hosts: list[tuple[str, str]]
+) -> list[SourceLastSeen]:
+    """
+    Each host alias and enabled Docker host with when it last sent a log, as Settings -> Sources
+    shows them: an alias by its address's newest log of any kind but Docker (container logs from
+    that address belong to the Docker host), a Docker host by its containers' newest log.
+    """
+    activity = get_source_activity()
+    seen = activity.by_address(exclude_kinds={KIND_DOCKER})
+    sources = [
+        SourceLastSeen(name=alias, kind="alias", address=ip, last_seen=us_to_iso(seen.get(ip)))
+        for ip, alias in aliases
+    ]
+    sources += [
+        SourceLastSeen(
+            name=name, kind="docker", address=address,
+            last_seen=us_to_iso(activity.last_seen(address, KIND_DOCKER)),
+        )
+        for address, name in docker_hosts
+    ]
+    return sources
+
+
+def _newest_backup(db_path) -> Optional[LastBackup]:
+    """When the newest backup archive was made and its size, or None when there is none or the folder cannot be read."""
+    try:
+        backups = list_backups(backups_dir(db_path))
+    except OSError as exc:
+        logger.warning(f"Could not list the backups folder for the metrics: {exc}")
+        return None
+    if not backups:
+        return None
+    newest = backups[0]
+    return LastBackup(created_at=newest.created_at.isoformat(), size_bytes=newest.size_bytes)

@@ -1780,6 +1780,21 @@ class TestMCPStdio:
         assert isinstance(http_metrics["ingest_rate"], float)
 
     @pytest.mark.asyncio
+    async def test_stdio_metrics_read_the_saved_last_seen_times(self, tmp_path: Path):
+        import sqlite3
+
+        from app.services.source_activity import us_to_iso
+
+        db_path = tmp_path / "logs.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES ('10.0.0.5', 'nas', CURRENT_TIMESTAMP)")
+            # As the web process's SourceActivityWorker saves it (kind 1 is syslog)
+            conn.execute("INSERT INTO source_last_seen (source_ip, source_kind, last_seen_us) VALUES ('10.0.0.5', 1, 3000000)")
+        stdio_metrics = await create_mcp_server(stdio=True)._tool_manager._tools["get_system_metrics"].fn()
+        nas = next(s for s in stdio_metrics["sources"] if s["name"] == "nas")
+        assert nas["last_seen"] == us_to_iso(3_000_000)
+
+    @pytest.mark.asyncio
     async def test_stdio_maintenance_tools_note_the_sync_delay(self, tmp_path: Path):
         tools = create_mcp_server(stdio=True)._tool_manager._tools
         started = await tools["enable_maintenance"].fn(duration_minutes=5)

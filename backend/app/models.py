@@ -1622,6 +1622,22 @@ class SystemMaintenanceMetrics(BaseModel):
     log_handling: str = "silence_alerts"
 
 
+class SourceLastSeen(BaseModel):
+    """A configured log source (a host alias or an enabled Docker host) and when it last sent a log."""
+    name: str
+    # "alias" (its address's logs of any kind but Docker) or "docker" (the host's container logs)
+    kind: Literal["alias", "docker"]
+    address: str
+    # ISO 8601 UTC; None when the source has sent no log since LogShed 1.4.0
+    last_seen: Optional[str] = None
+
+
+class LastBackup(BaseModel):
+    """The newest database backup: when it was made and its size (the list itself is not exposed)."""
+    created_at: str
+    size_bytes: int
+
+
 class SystemMetricsResponse(BaseModel):
     """Comprehensive system telemetry and performance metrics for external monitoring."""
     status: str = "ok"
@@ -1650,6 +1666,10 @@ class SystemMetricsResponse(BaseModel):
     loop_lag_ms: Optional[float] = None
     loop_lag_p95_ms: Optional[float] = None
     loop_lag_max_ms: Optional[float] = None
+    # The configured sources and when each last sent a log
+    sources: list[SourceLastSeen] = Field(default_factory=list)
+    # The newest database backup; None when there is none
+    last_backup: Optional[LastBackup] = None
 
 
 

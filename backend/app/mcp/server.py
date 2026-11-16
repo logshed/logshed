@@ -15,6 +15,7 @@ another task (the session manager's task group, or the SSE GET request). The std
 runs as a local process and has full access.
 """
 
+import asyncio
 import datetime
 import json
 import logging
@@ -37,6 +38,7 @@ from app.services.log_search import count_logs as count_logs_service
 from app.services.log_search import log_context, parse_api_log_filter, search_logs
 from app.core.utils import format_severity_label, resolve_severity
 from app.models import ExternalMaintenanceEnableRequest
+from app.services.source_activity import get_source_activity
 from app.services.maintenance_service import (
     create_maintenance_session,
     disable_maintenance_sessions,
@@ -101,7 +103,8 @@ STDIO_MAINTENANCE_NOTE = (
 )
 STDIO_NOTICE = (
     "This stdio server runs as a separate process: get_system_metrics reports the live ingestion counters "
-    "as null, and maintenance changes reach the web process within 30 seconds."
+    "as null and the sources' last-seen times up to a minute late, and maintenance changes reach the web "
+    "process within 30 seconds."
 )
 
 # For in-process callers outside any MCP request (tests and internal helpers); transports never set it.
@@ -283,12 +286,16 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         description=(
             "Inspect homelab log rates, error counts (1h/24h), 24h counts per severity (emergency to warning), "
             "top error apps/hosts, "
-            "active alert states, disk usage, and maintenance status. Requires the system:read scope."
+            "active alert states, disk usage, maintenance status, when each configured source last sent a log, "
+            "and the newest backup's time and size. Requires the system:read scope."
         ),
     )
     async def get_system_metrics() -> dict[str, Any]:
         """Fetch system metrics, error distribution, and operational state."""
         _require("system:read", "get_system_metrics")
+        if stdio:
+            # The web process saves when each source last sent a log once a minute; read those times
+            await asyncio.to_thread(get_source_activity().load)
         resp = await system_metrics.get_system_metrics()
         data = resp.model_dump()
         if stdio:
