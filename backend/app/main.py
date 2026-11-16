@@ -335,14 +335,19 @@ async def _drop_filter_flush_worker() -> None:
 
 
 async def _source_activity_flush_worker() -> None:
-    """Save when each source last sent a log once a minute, so it survives a restart."""
+    """
+    Save when each source last sent a log once a minute, so it survives a restart, and read the
+    host aliases' and Docker hosts' addresses again, which forgetting old sources keeps.
+    """
     from app.services.source_activity import get_source_activity
 
     warned = False
     while True:
         try:
             await asyncio.sleep(60)
-            await asyncio.to_thread(get_source_activity().flush)
+            activity = get_source_activity()
+            await asyncio.to_thread(activity.refresh_configured)
+            await asyncio.to_thread(activity.flush)
             warned = False
         except asyncio.CancelledError:
             break

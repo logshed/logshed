@@ -89,6 +89,33 @@ class TestMap:
         assert set(kept) == {f"10.0.0.{i}" for i in range(5, 11)}
 
 
+    def test_configured_sources_are_never_forgotten(self, db_file: Path, monkeypatch):
+        """A flood of made-up addresses does not push out a quiet alias or Docker host."""
+        monkeypatch.setattr(source_activity, "MAX_SOURCES", 10)
+        monkeypatch.setattr(source_activity, "KEEP_AFTER_EVICTION", 6)
+        with open_db(db_file) as conn:
+            conn.execute(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, 'nas', CURRENT_TIMESTAMP)", (NAS_IP,)
+            )
+            conn.execute(
+                "INSERT INTO docker_endpoints (name, url, source_alias, enabled, created_at, updated_at) VALUES"
+                " ('Media', 'tcp://10.0.5.20:2375', 'media', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+        activity = SourceActivity(db_file)
+        activity.load()
+        # The configured sources are the quietest
+        activity.note([{"source_ip": NAS_IP, "source_kind": KIND_SYSLOG}], now_us=T0 - 100)
+        activity.note([{"source_ip": "10.0.5.20", "source_kind": KIND_DOCKER}], now_us=T0 - 99)
+        for i in range(11):
+            activity.note([{"source_ip": f"10.0.0.{i}", "source_kind": KIND_SYSLOG}], now_us=T0 + i)
+        kept = activity.by_address()
+        assert kept[NAS_IP] == T0 - 100
+        assert kept["10.0.5.20"] == T0 - 99
+        # The flood's oldest go: past 10 sources (at 10.0.0.8) the map was cut to 6, the two configured
+        # ones and the four newest others, and 10.0.0.9 and 10.0.0.10 came after
+        assert set(kept) - {NAS_IP, "10.0.5.20"} == {f"10.0.0.{i}" for i in range(5, 11)}
+
+
 class TestSaved:
     def test_flush_saves_and_load_reads_back_after_a_restart(self, db_file: Path):
         activity = SourceActivity(db_file)

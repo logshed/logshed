@@ -21,7 +21,8 @@ from app.core.migrations import get_connection
 logger = logging.getLogger(__name__)
 
 # Syslog is unauthenticated, so a sender can make up addresses without end: past this many
-# sources the ones heard from longest ago are forgotten (KEEP_AFTER_EVICTION remain)
+# sources the ones heard from longest ago are forgotten (KEEP_AFTER_EVICTION remain), except the
+# addresses of host aliases and Docker hosts, which are quiet longest exactly when it matters
 MAX_SOURCES = 10_000
 KEEP_AFTER_EVICTION = 9_000
 
@@ -35,6 +36,8 @@ class SourceActivity:
         self._seen: dict[tuple[str, int], int] = {}
         self._dirty: set[tuple[str, int]] = set()
         self._evicted: set[tuple[str, int]] = set()
+        # Addresses of host aliases and Docker hosts, never forgotten (read by refresh_configured)
+        self._configured: frozenset[str] = frozenset()
 
     def note(self, entries: Iterable[dict], now_us: Optional[int] = None) -> None:
         """Record the sources of stored entries as seen now. Runs on the event loop for every batch."""
@@ -53,9 +56,11 @@ class SourceActivity:
                 self._evict()
 
     def _evict(self) -> None:
-        """Forget the sources heard from longest ago (the lock is held)."""
-        newest_first = sorted(self._seen.items(), key=lambda kv: kv[1], reverse=True)
-        for key, _ in newest_first[KEEP_AFTER_EVICTION:]:
+        """Forget the sources heard from longest ago, but no configured one (the lock is held)."""
+        others = [kv for kv in self._seen.items() if kv[0][0] not in self._configured]
+        keep = max(0, KEEP_AFTER_EVICTION - (len(self._seen) - len(others)))
+        newest_first = sorted(others, key=lambda kv: kv[1], reverse=True)
+        for key, _ in newest_first[keep:]:
             del self._seen[key]
             self._dirty.discard(key)
             self._evicted.add(key)
@@ -77,6 +82,23 @@ class SourceActivity:
             times = [seen for (a, _k), seen in self._seen.items() if a == address]
         return max(times) if times else None
 
+    def refresh_configured(self, conn: Optional[sqlite3.Connection] = None) -> int:
+        """Read the addresses of the host aliases and Docker hosts, which eviction keeps. Returns how many."""
+        from app.collectors.docker_collector import effective_source_ip
+
+        def _read(c: sqlite3.Connection) -> set[str]:
+            try:
+                addresses = {r[0] for r in c.execute("SELECT ip FROM host_aliases WHERE ip != 'docker'")}
+                for endpoint_id, url, alias in c.execute("SELECT id, url, source_alias FROM docker_endpoints"):
+                    addresses.add(effective_source_ip(url, alias, endpoint_id))
+            except sqlite3.OperationalError:
+                return set()  # a database still to be upgraded
+            return addresses
+        addresses = self._with_conn(conn, _read) or set()
+        with self._lock:
+            self._configured = frozenset(addresses)
+        return len(addresses)
+
     def load(self, conn: Optional[sqlite3.Connection] = None) -> int:
         """Read the saved times (kept where a newer one is already in memory). Returns how many."""
         def _read(c: sqlite3.Connection) -> list[tuple]:
@@ -85,6 +107,7 @@ class SourceActivity:
             except sqlite3.OperationalError:
                 return []  # before schema 4, or a database still to be upgraded
         rows = self._with_conn(conn, _read) or []
+        self.refresh_configured(conn)
         with self._lock:
             for address, kind, seen in rows:
                 key = (str(address), int(kind))
