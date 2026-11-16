@@ -48,12 +48,14 @@ interface LogDetailModalProps {
 
 const AI_OFF_TITLE = 'AI features are turned off in Settings';
 
-/** True when a key press comes from a text field, where Up, Down, J and K must keep their usual meaning. */
+/** True when a key press comes from a text field or a scrolling box, where Up, Down, J and K keep their usual meaning. */
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  return target.isContentEditable || target.closest('[contenteditable]:not([contenteditable="false"])') !== null;
+  if (target.isContentEditable || target.closest('[contenteditable]:not([contenteditable="false"])') !== null) return true;
+  // The message, tree and raw boxes scroll with the arrow keys when focus is in them
+  return target.closest('[data-arrow-scroll]') !== null;
 }
 
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
@@ -522,7 +524,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             </div>
           </div>
           {showTree && jsonMessage ? (
-            <div className="bg-canvas border border-line rounded-lg p-2 max-h-96 overflow-y-auto select-text">
+            <div data-arrow-scroll className="bg-canvas border border-line rounded-lg p-2 max-h-96 overflow-y-auto select-text">
               {jsonMessage.prefix && (
                 <div className="font-mono text-xs text-fg-soft whitespace-pre-wrap break-all px-1 pb-1 mb-1 border-b border-line-subtle">
                   {jsonMessage.prefix}
@@ -535,6 +537,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <div
               tabIndex={0}
               role="region"
+              data-arrow-scroll
               aria-label="Message text"
               className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
             >
@@ -564,6 +567,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
           <div
             tabIndex={0}
             role="region"
+            data-arrow-scroll
             aria-label={rawLabel}
             className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg-muted text-[11px] whitespace-pre-wrap break-all select-text max-h-36 overflow-y-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
           >

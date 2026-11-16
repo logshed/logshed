@@ -36,6 +36,7 @@ import {
 } from './LogRow.tsx';
 import { alertRulePrefillFromLog } from '../../utils/alertRulePrefill.ts';
 import { fetchNotificationChannels } from '../../api/notifications.ts';
+import { providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import { HostAliasFormModal, HostAliasFormValues } from '../aliases/HostAliasFormModal.tsx';
 import { DeletedDockerHost, DeletedDockerHostNotice } from '../settings/DeletedDockerHostNotice.tsx';
 import type { AlertRulePrefill } from '../alerts/AlertRuleModal.tsx';
@@ -112,6 +113,22 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // The other dialogs the drawer opens on top of itself
   const [drawerDialog, setDrawerDialog] = useState<DrawerDialog | null>(null);
   const drawerDialogKeyRef = useRef(0);
+  // The log the drawer shows now, for actions that read something first: by the time the read
+  // returns, the drawer may have moved to another log or closed, and then the dialog is not opened
+  const drawerLogIdRef = useRef<number | null>(null);
+  drawerLogIdRef.current = activeLogDetail?.id ?? null;
+  const drawerReadPendingRef = useRef(false);
+  const afterDrawerRead = useCallback(async <T,>(read: () => Promise<T>, open: (result: T) => void) => {
+    if (drawerReadPendingRef.current) return;
+    const logId = drawerLogIdRef.current;
+    drawerReadPendingRef.current = true;
+    try {
+      const result = await read();
+      if (drawerLogIdRef.current === logId) open(result);
+    } finally {
+      drawerReadPendingRef.current = false;
+    }
+  }, []);
   const openDrawerDialog = useCallback((dialog: DrawerDialogRequest) => {
     drawerDialogKeyRef.current += 1;
     setDrawerDialog({ ...dialog, key: drawerDialogKeyRef.current } as DrawerDialog);
@@ -124,6 +141,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
   // Off until settings load, so users who never turned AI on do not see AI buttons flash in
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
+  const [aiConfigured, setAiConfigured] = useState<boolean>(false);
   // Desktop column widths: CSS variables on the table box, remembered by this browser
   const tableRef = useRef<HTMLDivElement>(null);
   const columns = useColumnWidths(tableRef, aiEnabled);
@@ -140,6 +158,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       .then((s) => {
         if (s.server_timezone) setServerTimezone(s.server_timezone);
         setAiEnabled(s.ai_enabled ?? Boolean(s.has_ai_api_key));
+        // The alert rule dialog's AI enrichment needs a usable provider, as on the Rules page
+        setAiConfigured(Boolean(s.ai_enabled && (s.has_ai_api_key || !providerNeedsApiKey(s.ai_provider))));
         if (s.syslog_port) setSyslogPort(s.syslog_port);
       })
       .catch(() => {});
@@ -173,6 +193,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     onLoaded: (aliases, dockerAliases) => buffer.reapplyRowAliases(aliases, dockerAliases),
     onChanged: (change: SourcesChange) => {
       buffer.remapRows(change.remapRow);
+      // The drawer holds its own copy of the log: rename it too, so it shows the saved name at once
+      setActiveLogDetail((prev) => (prev ? change.remapRow(prev as ProcessedLogEntry) : prev));
       facets.applySourcesChange(change);
       // Keep the host filter on a renamed or removed alias
       setFilters((prev) => renameFilterHosts(prev, change.hostReplacements));
@@ -557,11 +579,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const { selectedLogIds } = selection;
   // The Download Logs dialog, and which logs it offers first; null while it is closed
   const [downloadScope, setDownloadScope] = useState<DownloadScope | null>(null);
-  const selectedIdList = useMemo(() => Array.from(selectedLogIds), [selectedLogIds]);
   const selectedLogs = useMemo(() => {
     if (selectedLogIds.size === 0) return EMPTY_SELECTED_LOGS;
     return logs.filter((l) => selectedLogIds.has(l.id));
   }, [logs, selectedLogIds]);
+  // The ticked rows still in the list, as "Download (N)" counts them
+  const selectedIdList = useMemo(() => selectedLogs.map((l) => l.id), [selectedLogs]);
 
   const handleLaunchAiAnalysis = () => {
     if (selectedLogs.length > 0) {
@@ -720,9 +743,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             <div className="flex min-w-0 items-center justify-between gap-2 pl-2">
               <span>MESSAGE</span>
               {columns.changed && (
-                <Button variant="ghost" size="sm" className="-my-1" onClick={() => columns.reset()}>
-                  Reset widths
-                </Button>
+                // The heading is monospace; the button keeps the interface font, as every button does
+                <span className="font-sans -my-1">
+                  <Button variant="ghost" size="sm" onClick={() => columns.reset()}>
+                    Reset widths
+                  </Button>
+                </span>
               )}
             </div>
             {aiEnabled && <div className="text-right pr-2">ACTIONS</div>}
@@ -911,17 +937,18 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               return;
             }
             // The Console knows names only: the alias's notes are read first, so saving keeps them
-            try {
-              const stored = (await fetchAliases()).find((a) => a.ip === ip);
-              openDrawerDialog({ kind: 'alias', initial: { ip, alias: stored?.alias ?? alias, notes: stored?.notes }, editing: true });
-            } catch {
-              openDrawerDialog({
-                kind: 'alias',
-                initial: { ip, alias },
-                editing: true,
-                initialError: "This alias's notes could not be read; saving now clears them.",
-              });
-            }
+            await afterDrawerRead(
+              () => fetchAliases().then((list) => list.find((a) => a.ip === ip) ?? null, () => undefined),
+              (stored) =>
+                stored === undefined
+                  ? openDrawerDialog({
+                      kind: 'alias',
+                      initial: { ip, alias },
+                      editing: true,
+                      initialError: "This alias's notes could not be read; saving now clears them.",
+                    })
+                  : openDrawerDialog({ kind: 'alias', initial: { ip, alias: stored?.alias ?? alias, notes: stored?.notes }, editing: true }),
+            );
           }}
           onEditDockerHost={(endpointId) => {
             const host = sources.dockerEndpoints.find((h) => h.id === endpointId);
@@ -944,12 +971,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onCreateDropRule={setDropRuleTargetLog}
           onCreateAlertRule={async (targetLog) => {
             // The dialog lists the notification channels, so they are read first; without them the rule can still be saved
-            const channels = await fetchNotificationChannels().catch(() => [] as NotificationChannel[]);
-            openDrawerDialog({
-              kind: 'alert',
-              prefill: alertRulePrefillFromLog(targetLog, facets.allAvailableApps),
-              channels,
-            });
+            await afterDrawerRead(
+              () => fetchNotificationChannels().catch(() => [] as NotificationChannel[]),
+              (channels) =>
+                openDrawerDialog({ kind: 'alert', prefill: alertRulePrefillFromLog(targetLog, facets.allAvailableApps), channels }),
+            );
           }}
           onDeleteLog={(deletedLog) => {
             buffer.removeRows(new Set([deletedLog.id]));
@@ -992,7 +1018,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               editingHost={drawerDialog.host}
               initialAddHost={drawerDialog.initialAddHost}
               onClose={() => setDrawerDialog(null)}
-              onSaved={async () => bumpAliasVersion()}
+              onSaved={async () => {
+                // The Docker host dialog leaves closing to whoever opened it
+                setDrawerDialog(null);
+                bumpAliasVersion();
+              }}
             />
           ) : (
             <AlertRuleModal
@@ -1004,7 +1034,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               availableApps={facets.allAvailableApps}
               availableHosts={facets.allAvailableSources}
               selfReportedHosts={facets.selfReportedHosts}
-              isAiConfigured={aiEnabled}
+              isAiConfigured={aiConfigured}
               prefill={drawerDialog.prefill}
               onClose={() => setDrawerDialog(null)}
               onSuccess={() => setDrawerDialog(null)}

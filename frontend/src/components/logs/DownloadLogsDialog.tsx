@@ -155,7 +155,7 @@ export const DownloadLogsDialog: React.FC<DownloadLogsDialogProps> = ({
             ? 'The ticked rows, newest first, with every field and the raw text.'
             : `At most the newest ${LOG_DOWNLOAD_CAP.toLocaleString()} logs of the search, with every field and the raw text.`}
           {' Times are in UTC.'}
-          {format === 'csv' && ' In CSV, a value that starts with =, +, - or @ gets a leading apostrophe, so a spreadsheet does not run it as a formula.'}
+          {format === 'csv' && ' In CSV, a value that starts with =, +, -, @, a tab or a carriage return gets a leading apostrophe, so a spreadsheet does not run it as a formula.'}
         </p>
 
         {cappedRows !== null && (

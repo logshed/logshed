@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LogDetailModal } from '../components/logs/LogDetailModal.tsx';
 import { JsonTree, JSON_TREE_MAX_ENTRIES } from '../components/logs/JsonTree.tsx';
-import { JSON_MESSAGE_MAX_LENGTH, JSON_PREFIX_MAX_LENGTH, jsonValueToCopy, parseJsonMessage } from '../utils/jsonMessage.ts';
+import { JSON_MESSAGE_MAX_LENGTH, JSON_PREFIX_MAX_LENGTH, JsonValue, jsonValueToCopy, parseJsonMessage } from '../utils/jsonMessage.ts';
 import { LogEntry } from '../types.ts';
 import * as clipboardModule from '../utils/clipboard.ts';
 
@@ -118,6 +118,41 @@ describe('JsonTree', () => {
   });
 });
 
+describe('JSON values as written', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows and copies a large integer and a written decimal as they are in the message', async () => {
+    const parsed = parseJsonMessage('{"trace":12345678901234567890,"ratio":1.50,"n":7}');
+    const copy = vi.spyOn(clipboardModule, 'copyToClipboard').mockResolvedValue(true);
+    render(<JsonTree value={parsed!.value} label="Message as JSON" />);
+    const tree = screen.getByRole('list', { name: 'Message as JSON' });
+    expect(tree).toHaveTextContent('trace: 12345678901234567890');
+    expect(tree).toHaveTextContent('ratio: 1.50');
+    expect(tree).toHaveTextContent('n: 7');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy value of trace' }));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith('12345678901234567890'));
+    expect(jsonValueToCopy(parsed!.value)).toContain('"trace": 12345678901234567890');
+  });
+
+  it('a message nested past what the engine can read stays text, and never stops the page', () => {
+    const depth = 20000;
+    expect(parseJsonMessage('{"a":' + '['.repeat(depth) + '1' + ']'.repeat(depth) + '}')).toBeNull();
+  });
+
+  it('a value nested too deep to write copies nothing, and only when its button is pressed', async () => {
+    let deep: JsonValue = 1;
+    for (let i = 0; i < 20000; i++) deep = [deep];
+    expect(jsonValueToCopy(deep)).toBe('');
+    const copy = vi.spyOn(clipboardModule, 'copyToClipboard').mockResolvedValue(true);
+    render(<JsonTree value={{ a: deep }} label="Message as JSON" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy value of a' }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(copy).not.toHaveBeenCalled();
+  });
+});
+
 describe('Log drawer with a JSON message', () => {
   const jsonLog: LogEntry = {
     id: 7,
@@ -168,6 +203,25 @@ describe('Log drawer with a JSON message', () => {
     expect(screen.queryByRole('button', { name: 'Tree' })).toBeNull();
     expect(screen.queryByRole('list', { name: 'Message as JSON' })).toBeNull();
     expect(screen.getAllByText('plain line').length).toBeGreaterThan(0);
+  });
+
+  it('Up and Down in the message box scroll it instead of stepping to another log', () => {
+    const onNavigateNewer = vi.fn();
+    const onNavigateOlder = vi.fn();
+    render(
+      <LogDetailModal log={textLog} isOpen onClose={vi.fn()} onExplainWithAi={vi.fn()} onNavigateNewer={onNavigateNewer} onNavigateOlder={onNavigateOlder} hasNewerLog hasOlderLog />
+    );
+    const box = screen.getByRole('region', { name: 'Message text' });
+    box.focus();
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    fireEvent.keyDown(box, { key: 'ArrowUp' });
+    expect(onNavigateOlder).not.toHaveBeenCalled();
+    expect(onNavigateNewer).not.toHaveBeenCalled();
+    // Elsewhere in the drawer the keys still step
+    const heading = screen.getByRole('button', { name: /Older/ });
+    heading.focus();
+    fireEvent.keyDown(heading, { key: 'ArrowDown' });
+    expect(onNavigateOlder).toHaveBeenCalledTimes(1);
   });
 
   it('still copies the whole message', async () => {

@@ -759,6 +759,67 @@ describe('Log drawer actions open dialogs over the drawer', () => {
     expect(screen.getByRole('dialog', { name: /Log Record #201/ })).toBeInTheDocument();
   });
 
+  it('saving the Docker host dialog closes it and leaves the drawer', async () => {
+    const update = vi.spyOn(dockerHostsApi, 'updateDockerEndpoint').mockResolvedValue({ ...endpoint } as any);
+    const drawer = await openDrawer('Container log line', 201);
+    fireEvent.click(await within(drawer).findByRole('button', { name: 'Edit Docker Host' }));
+    const dialog = await screen.findByRole('dialog', { name: /Docker Host/ });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update Host' }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Edit Docker Host/ })).toBeNull());
+    expect(bump).toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: /Log Record #201/ })).toBeInTheDocument();
+  });
+
+  it('a second press while the channels load opens one dialog, and none once the drawer has moved on', async () => {
+    let release: (v: any[]) => void = () => {};
+    const channels = vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockImplementation(
+      () => new Promise((r) => { release = r; })
+    );
+    const drawer = await openDrawer('Nginx upstream connection timeout', 101);
+    const button = within(drawer).getByRole('button', { name: /Create Alert Rule/i });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(channels).toHaveBeenCalledTimes(1);
+    await act(async () => release([]));
+    expect(await screen.findAllByRole('dialog', { name: 'Create New Alert Rule' })).toHaveLength(1);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create New Alert Rule' })).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create New Alert Rule' })).toBeNull());
+
+    // Pressed, then the drawer steps to an older log before the channels arrive: no dialog
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Log Record #101/ })).getByRole('button', { name: /Create Alert Rule/i }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Log Record #101/ })).getByRole('button', { name: /Older/ }));
+    await screen.findByRole('dialog', { name: /Log Record #102/ });
+    await act(async () => release([]));
+    expect(screen.queryByRole('dialog', { name: 'Create New Alert Rule' })).toBeNull();
+  });
+
+  it('the drawer shows a new alias as soon as it is saved', async () => {
+    vi.spyOn(aliasesApi, 'saveAlias').mockResolvedValue({} as any);
+    const aliases = vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    const ctx = { aliasVersion: 0, bumpAliasVersion: vi.fn() };
+    const { rerender } = render(
+      <AliasContext.Provider value={ctx}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+    fireEvent.click(await screen.findByText('Unnamed sender line'));
+    const drawer = await screen.findByRole('dialog', { name: /Log Record #203/ });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Add Host Alias' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add Host Alias' });
+    fireEvent.change(within(dialog).getByLabelText(/Friendly Host Alias/), { target: { value: 'printer' } });
+    aliases.mockResolvedValue([{ ip: '10.0.0.9', alias: 'printer' } as any]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Mapping' }));
+    await waitFor(() => expect(ctx.bumpAliasVersion).toHaveBeenCalled());
+    // The app bumps the shared version, and the Console reads the names again
+    rerender(
+      <AliasContext.Provider value={{ ...ctx, aliasVersion: 1 }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+    expect(await screen.findByRole('dialog', { name: /Log Record #203 - printer/ })).toBeInTheDocument();
+  });
+
   it('Configure Docker Host explains a deleted host, then re-adds it or adds a syslog alias, all over the drawer', async () => {
     const drawer = await openDrawer('Old container line', 202);
     fireEvent.click(within(drawer).getByRole('button', { name: 'Configure Docker Host' }));

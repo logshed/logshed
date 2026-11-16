@@ -260,6 +260,35 @@ class TestStreamStops:
         assert checks[-1](), "a closed download interrupts its database work"
 
 
+class TestSlowClient:
+    @pytest.mark.asyncio
+    async def test_time_spent_sending_does_not_count_against_the_limit(self, tmp_path, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr(log_export, "EXPORT_PAGE_SIZE", 2)
+        monkeypatch.setattr(log_export, "SEARCH_TIME_LIMIT_SECONDS", 0.3)
+        store_logs(tmp_path / "logs.db", *(entry(i) for i in range(7)))
+        # What each later page's interrupt check says as the page starts (SQLite asks it only every
+        # so many instructions, too rarely for these small pages to show it)
+        at_start = []
+        real = deps.run_db_query
+
+        async def recording(fn, custom_db_path=None, should_interrupt=None):
+            if should_interrupt is not None:
+                at_start.append(should_interrupt())
+            return await real(fn, custom_db_path=custom_db_path, should_interrupt=should_interrupt)
+
+        monkeypatch.setattr(deps, "run_db_query", recording)
+        response = await log_export.export_logs(LogFilter(), "ndjson", False)
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk)
+            # A slow connection: 4 pages x 0.15 s is twice the limit
+            await asyncio.sleep(0.15)
+        assert len(read_ndjson("".join(chunks))) == 7
+        assert at_start == [False, False, False, False]  # the first page and three more
+
+
 class TestApiV1Export:
     @pytest_asyncio.fixture
     async def token_headers(self, client, session_headers):

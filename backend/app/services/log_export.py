@@ -6,9 +6,11 @@ The logs are read newest first one page at a time (keyset paging, log_store.sear
 as each page arrives, so memory stays at one page whatever the size of the download. The first
 page is read before the response starts, with the count of matches capped at EXPORT_ROW_CAP + 1:
 an error, a disconnect or the search time limit there still gives an HTTP status, and the
-headers can say how many logs follow and whether the cap cut them. Later pages share the same
-time limit; when it runs out, or the database fails, part way through, the response is cut off
-without its end, so the client sees a failed download rather than a short file that looks whole.
+headers can say how many logs follow and whether the cap cut them. The search time limit counts
+the time spent reading pages, not the time spent sending them, so a slow connection does not cut
+a download short. When the limit runs out, or the database fails, part way through, the response
+is cut off without its end, so the client sees a failed download rather than a short file that
+looks whole.
 """
 
 import asyncio
@@ -152,8 +154,25 @@ async def export_logs(
     capped = total > row_cap
     expected = min(total, row_cap)
 
-    def _should_interrupt() -> bool:
-        return stopped.is_set() or time.monotonic() > deadline
+    # What is left of the search time limit after the first page; only database time counts
+    budget = {"left": deadline - time.monotonic()}
+
+    def _read_next(fetch: int, before: Optional[tuple[str, int]]):
+        page_deadline = time.monotonic() + budget["left"]
+
+        def _should_interrupt() -> bool:
+            return stopped.is_set() or time.monotonic() > page_deadline
+
+        async def _run():
+            started = time.monotonic()
+            try:
+                return await run_db_query(
+                    lambda conn: _read_page(conn, fetch, 0, before), should_interrupt=_should_interrupt
+                )
+            finally:
+                budget["left"] -= time.monotonic() - started
+
+        return _run()
 
     async def _body() -> AsyncIterator[str]:
         sent, count, last, text, fetch = 0, first_count, first_last, first_text, first_fetch
@@ -167,10 +186,7 @@ async def export_logs(
                     return
                 fetch = min(page_size, row_cap - sent)
                 try:
-                    _, count, last, text = await run_db_query(
-                        lambda conn, fetch=fetch, before=last: _read_page(conn, fetch, 0, before),
-                        should_interrupt=_should_interrupt,
-                    )
+                    _, count, last, text = await _read_next(fetch, last)
                 except sqlite3.OperationalError as exc:
                     if stopped.is_set():
                         return

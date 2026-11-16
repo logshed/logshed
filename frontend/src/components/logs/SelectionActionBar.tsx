@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertCircle, Download, Sparkles, Trash2 } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
-import { buttonClass } from '../common/Button.tsx';
+import { Button, buttonClass } from '../common/Button.tsx';
 
 interface SelectionActionBarProps {
   selectedLogs: LogEntry[];
@@ -61,10 +61,9 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
           Deselect All
         </button>
 
-        <button onClick={onDownload} className={buttonClass('secondary', 'md')}>
-          <Download className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>Download ({selectedLogs.length})</span>
-        </button>
+        <Button onClick={onDownload} icon={<Download className="w-3.5 h-3.5" aria-hidden="true" />}>
+          Download ({selectedLogs.length})
+        </Button>
 
         <button
           onClick={onDelete}

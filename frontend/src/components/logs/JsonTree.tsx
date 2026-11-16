@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { DisclosureButton } from '../common/Button.tsx';
 import { CopyButton } from '../common/CopyButton.tsx';
-import { JsonObject, JsonValue, jsonValueToCopy } from '../../utils/jsonMessage.ts';
+import { JsonObject, JsonValue, WrittenNumber, jsonValueToCopy } from '../../utils/jsonMessage.ts';
 
 /** Two levels of keys show at first: the message's own and those of the objects in it; deeper ones start closed. */
 const OPEN_DEPTH = 1;
@@ -12,7 +12,7 @@ export const JSON_TREE_MAX_ENTRIES = 200;
 type Container = JsonObject | JsonValue[];
 
 function isContainer(value: JsonValue): value is Container {
-  return value !== null && typeof value === 'object';
+  return value !== null && typeof value === 'object' && !(value instanceof WrittenNumber);
 }
 
 function entriesOf(value: Container): [string, JsonValue][] {
@@ -33,6 +33,7 @@ function summary(value: Container): string {
 const Leaf: React.FC<{ value: Exclude<JsonValue, Container> }> = ({ value }) => {
   if (typeof value === 'string') return <span className="text-success-300">&quot;{value}&quot;</span>;
   if (typeof value === 'number') return <span className="text-warning-300">{String(value)}</span>;
+  if (value instanceof WrittenNumber) return <span className="text-warning-300">{value.text}</span>;
   return <span className="text-highlight-300">{String(value)}</span>;
 };
 
@@ -58,7 +59,7 @@ const JsonNode: React.FC<NodeProps> = ({ name, path, value, isIndex, depth }) =>
           <span className="text-fg-muted">: </span>
           <Leaf value={value} />
         </span>
-        <CopyButton variant="icon" text={jsonValueToCopy(value)} label={`Copy value of ${path}`} iconClassName="w-3 h-3" />
+        <CopyButton variant="icon" text={() => jsonValueToCopy(value)} label={`Copy value of ${path}`} iconClassName="w-3 h-3" />
       </li>
     );
   }
@@ -80,7 +81,7 @@ const JsonNode: React.FC<NodeProps> = ({ name, path, value, isIndex, depth }) =>
             </span>
           </span>
         </DisclosureButton>
-        <CopyButton variant="icon" text={jsonValueToCopy(value)} label={`Copy value of ${path}`} iconClassName="w-3 h-3" />
+        <CopyButton variant="icon" text={() => jsonValueToCopy(value)} label={`Copy value of ${path}`} iconClassName="w-3 h-3" />
       </div>
       {open && (
         <>

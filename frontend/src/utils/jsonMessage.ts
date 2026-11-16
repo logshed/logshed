@@ -6,7 +6,16 @@ export const JSON_MESSAGE_MAX_LENGTH = 256 * 1024;
 /** Most characters before the opening brace, for a level, a timestamp or a logger name. */
 export const JSON_PREFIX_MAX_LENGTH = 80;
 
-export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+/**
+ * A number whose written form JavaScript would change (a 20-digit id rounded, `1.50` shown as
+ * `1.5`, `1e3` as `1000`), kept as written. Browsers without JSON.parse source text (Safari before
+ * 18.4) give plain numbers instead.
+ */
+export class WrittenNumber {
+  constructor(readonly text: string) {}
+}
+
+export type JsonValue = string | number | WrittenNumber | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
 export interface JsonMessage {
@@ -28,7 +37,7 @@ export function parseJsonMessage(message: string | null | undefined): JsonMessag
   if (start < 0 || start > JSON_PREFIX_MAX_LENGTH) return null;
   let value: unknown;
   try {
-    value = JSON.parse(text.slice(start));
+    value = JSON.parse(text.slice(start), keepWrittenNumbers);
   } catch {
     // Not JSON, or nested past the engine's limit (a RangeError)
     return null;
@@ -37,8 +46,30 @@ export function parseJsonMessage(message: string | null | undefined): JsonMessag
   return { prefix: text.slice(0, start).trim(), value: value as JsonObject };
 }
 
-/** The text a value's copy button copies: a string as it is, anything else as JSON. */
+function keepWrittenNumbers(this: unknown, _key: string, value: unknown, context?: { source?: string }): unknown {
+  if (typeof value === 'number' && context?.source !== undefined && String(value) !== context.source) {
+    return new WrittenNumber(context.source);
+  }
+  return value;
+}
+
+type RawJson = (text: string) => unknown;
+
+/**
+ * The text a value's copy button copies: a string as it is, anything else as indented JSON with
+ * numbers as written. Empty when it cannot be written (nested deeper than the engine allows).
+ */
 export function jsonValueToCopy(value: JsonValue): string {
   if (typeof value === 'string') return value;
-  return JSON.stringify(value, null, 2);
+  if (value instanceof WrittenNumber) return value.text;
+  const rawJson = (JSON as unknown as { rawJSON?: RawJson }).rawJSON;
+  try {
+    return JSON.stringify(
+      value,
+      (_key, v) => (v instanceof WrittenNumber ? (rawJson ? rawJson(v.text) : Number(v.text)) : v),
+      2,
+    );
+  } catch {
+    return '';
+  }
 }
