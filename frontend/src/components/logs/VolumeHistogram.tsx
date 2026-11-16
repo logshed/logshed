@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fetchLogHistogram, LogHistogram, LogHistogramBucket } from '../../api/logs.ts';
 import { ApiError } from '../../api/client.ts';
@@ -114,6 +115,14 @@ function pinnedBoxPosition(x: number): React.CSSProperties {
     ? { left: `max(0.75rem, calc(${bar} - 6rem))` }
     : { right: `max(0.75rem, calc(100% - ${bar} - 6rem))` };
 }
+
+/** Shown while counts are on their way: a search over many days can take several seconds. */
+const CountingNote: React.FC = () => (
+  <span className="flex items-center gap-1.5 text-[11px] font-mono text-fg-muted">
+    <Loader2 aria-hidden="true" className="w-3 h-3 motion-safe:animate-spin" />
+    Counting logs...
+  </span>
+);
 
 /** Only the parts of the filters the counts depend on, as a key that changes when they do. */
 const filterKey = (f: LogFilterParams) =>
@@ -264,7 +273,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   };
   let hint: string | null = null;
   if (data && !canZoom && !stale) hint = '1-second bars, the smallest';
-  else if (!isMobile) hint = touchUsed ? 'Tap a bar for its counts' : 'Click a bar to zoom in';
+  else if (data && !isMobile) hint = touchUsed ? 'Tap a bar for its counts' : 'Click a bar to zoom in';
   const busiest = bars.reduce<VolumeBar | null>((top, b) => (!top || b.total > top.total ? b : top), null);
   const summary = data
     ? `${caption}: ${total.toLocaleString()} logs from ${formatTimePoint(rangeFrom, timeZone, withSeconds)} to ${formatTimePoint(rangeTo, timeZone, withSeconds)}` +
@@ -281,6 +290,9 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         </span>
         {error ? (
           <span role="status" className="text-danger-300 truncate">Could not load the counts: {error}</span>
+        ) : stale ? (
+          // New filters are being counted; the old bars stay dimmed below meanwhile
+          <CountingNote />
         ) : (
           hint && <span>{hint}</span>
         )}
@@ -361,6 +373,11 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
               ))}
             </BarChart>
           </ResponsiveContainer>
+        )}
+        {!data && !tooSlow && !error && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <CountingNote />
+          </div>
         )}
         {tooSlow && !data && (
           <div role="status" className="absolute inset-0 flex items-center justify-center px-2 text-center text-[11px] font-mono text-fg-muted">

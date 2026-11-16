@@ -68,6 +68,24 @@ describe('VolumeHistogram', () => {
     expect(fetchSpy.mock.calls[0][0]).toEqual({ query: 'disk', apps: ['kernel'] });
   });
 
+  it('says it is counting until the first counts arrive, and while new filters are counted', async () => {
+    let answer: (value: LogHistogram) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<LogHistogram>((resolve) => { answer = resolve; }));
+    const { rerender } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    expect(screen.getByText('Counting logs...')).toBeInTheDocument();
+    // No bars yet, so nothing to click
+    expect(screen.queryByText('Click a bar to zoom in')).not.toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    await act(async () => answer(HOUR));
+    expect(screen.queryByText('Counting logs...')).not.toBeInTheDocument();
+    expect(screen.getByText('Click a bar to zoom in')).toBeInTheDocument();
+    rerender(<VolumeHistogram filters={{ query: 'disk' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    expect(screen.getByText('Counting logs...')).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    await act(async () => answer(HOUR));
+    expect(screen.queryByText('Counting logs...')).not.toBeInTheDocument();
+  });
+
   it('shows the total and describes the chart for screen readers', async () => {
     render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
