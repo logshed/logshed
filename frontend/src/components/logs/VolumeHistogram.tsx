@@ -96,6 +96,9 @@ const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string; withSeconds: boo
 // The tapped bar's colours over the dark band: about half as bright as the others
 const PINNED_OPACITY = 0.45;
 
+// How far a finger may move between down and up and still count as a tap on a bar
+const TAP_SLOP_PX = 10;
+
 const CHART_MARGIN = { top: 4, right: 4, left: 0, bottom: 0 };
 
 /** Only the parts of the filters the counts depend on, as a key that changes when they do. */
@@ -117,6 +120,8 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   const [error, setError] = useState<string | null>(null);
   // The last pointer on the chart: a touch pins a bar's counts instead of zooming at once
   const pointerTypeRef = useRef<string>('mouse');
+  // Where a touch went down, to tell a tap from a scroll
+  const touchDownRef = useRef<{ x: number; y: number } | null>(null);
   const [touchUsed, setTouchUsed] = useState(false);
   // The bar a tap pinned (its start), shown in a box that zooms when tapped
   const [pinnedStart, setPinnedStart] = useState<number | null>(null);
@@ -209,14 +214,28 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   };
   // The column under a click, from its position: Recharts' own active index follows the hover,
   // which a tap (or a click with no move before it) has not updated yet
-  const onChartClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (stale || bars.length === 0 || plotWidth <= 0) return;
-    const x = e.clientX - e.currentTarget.getBoundingClientRect().left - CHART_MARGIN.left;
+  const barAt = (clientX: number, box: HTMLElement): VolumeBar | null => {
+    if (stale || bars.length === 0 || plotWidth <= 0) return null;
+    const x = clientX - box.getBoundingClientRect().left - CHART_MARGIN.left;
     const at = domain[0] + (x / plotWidth) * (domain[1] - domain[0]);
     const bar = bars.reduce((near, b) => (Math.abs(b.mid - at) < Math.abs(near.mid - at) ? b : near));
-    if (Math.abs(bar.mid - at) > bucketMs / 2) return;
-    if (pointerTypeRef.current === 'touch') setPinnedStart(bar.start);
-    else if (canZoom) zoomTo(bar);
+    return Math.abs(bar.mid - at) > bucketMs / 2 ? null : bar;
+  };
+  // A mouse click zooms. Touches are handled on pointer up instead (onTouchTap): iOS Safari treats
+  // a first tap whose hover changes the page (Recharts' column highlight) as a hover only, and
+  // sends no click, so the first tap after a reload pinned nothing
+  const onChartClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (pointerTypeRef.current === 'touch') return;
+    const bar = barAt(e.clientX, e.currentTarget);
+    if (bar && canZoom) zoomTo(bar);
+  };
+  const onTouchTap = (e: React.PointerEvent<HTMLDivElement>) => {
+    const down = touchDownRef.current;
+    touchDownRef.current = null;
+    // A finger that moved was scrolling, not tapping
+    if (e.pointerType !== 'touch' || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_SLOP_PX) return;
+    const bar = barAt(e.clientX, e.currentTarget);
+    if (bar) setPinnedStart(bar.start);
   };
   let hint: string | null = null;
   if (data && !canZoom && !stale) hint = '1-second bars, the smallest';
@@ -250,7 +269,14 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         data-no-pull-refresh
         onPointerDown={(e) => {
           pointerTypeRef.current = e.pointerType;
-          if (e.pointerType === 'touch') setTouchUsed(true);
+          if (e.pointerType === 'touch') {
+            setTouchUsed(true);
+            touchDownRef.current = { x: e.clientX, y: e.clientY };
+          }
+        }}
+        onPointerUp={onTouchTap}
+        onPointerCancel={() => {
+          touchDownRef.current = null;
         }}
         // Recharts gives its drawing layers tabindex -1 (none is reached with Tab), so a press would
         // focus one and the browser drew its focus box around the bars: keep focus where it was

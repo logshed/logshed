@@ -107,8 +107,9 @@ describe('VolumeHistogram', () => {
     const onZoom = vi.fn();
     render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={onZoom} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    fireEvent.pointerDown(chartBox(), { pointerType: 'touch' });
-    clickChartAt(200);
+    // What iOS Safari sends for a first tap after a reload: pointer down and up, and no click
+    fireEvent.pointerDown(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    fireEvent.pointerUp(chartBox(), { pointerType: 'touch', clientX: 202, clientY: 31 });
     expect(onZoom).not.toHaveBeenCalled();
     // The tapped bar (the first) is drawn darker than the others
     const opacities = [...document.querySelectorAll('.recharts-bar-rectangle path')].map((el) => el.getAttribute('fill-opacity'));
@@ -118,6 +119,14 @@ describe('VolumeHistogram', () => {
     expect(box).toHaveTextContent('3/28 11:00 - 11:30: 7');
     fireEvent.click(box);
     expect(onZoom).toHaveBeenCalledWith('2026-03-28T11:00:00.000Z', '2026-03-28T11:29:59.999Z');
+    expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
+  });
+
+  it('does not take a finger that moves over the chart for a tap', async () => {
+    render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    fireEvent.pointerDown(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    fireEvent.pointerUp(chartBox(), { pointerType: 'touch', clientX: 260, clientY: 30 });
     expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
   });
 
