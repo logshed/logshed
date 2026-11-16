@@ -21,6 +21,7 @@ from app.core.migrations import run_migrations
 from app.core.net_guard import GuardedOpenAIHttpClient
 from app.core.rate_limiter import ai_rate_limiter, login_rate_limiter
 from app.core.security import (
+    decrypt_value,
     SESSION_COOKIE_NAME,
     create_session_token,
     encrypt_value,
@@ -1367,6 +1368,44 @@ class TestUnknownProviderRefused:
         rows = self._ai_rows(tmp_path)
         assert rows["ai_provider"] == "openai_compatible"
         assert rows["ai_model_anthropic"] == "claude-x"
+
+
+class TestPartialProviderSave:
+    """A provider entry that names only some fields changes those and keeps the rest."""
+
+    @pytest.mark.asyncio
+    async def test_fields_left_out_keep_their_stored_values(self, populated_db, auth_client, tmp_path):
+        res = await auth_client.post("/api/settings", json={
+            "ai_providers_config": {"anthropic": {
+                "ai_api_key": "sk-ant-" + "kept-key",
+                "ai_model": "claude-x",
+                "ai_fallback_models": "claude-y, claude-z",
+                "ai_base_url": "https://llm.example.com/v1",
+            }},
+        })
+        assert res.status_code == 200
+        before = TestUnknownProviderRefused._ai_rows(tmp_path)
+
+        res = await auth_client.post("/api/settings", json={
+            "ai_providers_config": {"anthropic": {"ai_model": "claude-w"}},
+        })
+        assert res.status_code == 200
+        rows = TestUnknownProviderRefused._ai_rows(tmp_path)
+        assert rows["ai_model_anthropic"] == "claude-w"
+        for key in ("ai_api_key_anthropic", "ai_fallback_models_anthropic", "ai_base_url_anthropic"):
+            assert rows[key] == before[key], key
+        assert decrypt_value(rows["ai_api_key_anthropic"]) == "sk-ant-kept-key"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_key_sent_on_purpose_still_clears_it(self, populated_db, auth_client, tmp_path):
+        await auth_client.post("/api/settings", json={
+            "ai_providers_config": {"anthropic": {"ai_api_key": "sk-ant-" + "gone-key"}},
+        })
+        res = await auth_client.post("/api/settings", json={
+            "ai_providers_config": {"anthropic": {"ai_api_key": ""}},
+        })
+        assert res.status_code == 200
+        assert TestUnknownProviderRefused._ai_rows(tmp_path)["ai_api_key_anthropic"] == ""
 
 
 class TestDefaultModelFallback:

@@ -281,11 +281,8 @@ describe('SettingsPanel Component', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(updateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          internal_log_level: 'ERROR',
-        })
-      );
+      // Only the changed field is sent
+      expect(updateSpy).toHaveBeenCalledWith({ internal_log_level: 'ERROR' });
     });
   });
 
@@ -708,11 +705,7 @@ describe('SettingsPanel Component', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(updateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          check_for_updates: false,
-        })
-      );
+      expect(updateSpy).toHaveBeenCalledWith({ check_for_updates: false });
     });
   });
 
@@ -970,12 +963,11 @@ describe('SettingsPanel Component', () => {
       fireEvent.click(saveBtn);
 
       await waitFor(() => {
-        expect(updateSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            daily_digest_enabled: true,
-            daily_digest_schedule_time: '18:30',
-          })
-        );
+        // The target was not touched, so it is not sent
+        expect(updateSpy).toHaveBeenCalledWith({
+          daily_digest_enabled: true,
+          daily_digest_schedule_time: '18:30',
+        });
       });
     });
   });
@@ -1061,6 +1053,71 @@ describe('SettingsPanel Component', () => {
       expect(restoredKeyInput.value).toBe('********');
     });
 
+    describe('a save sends only what changed', () => {
+      const twoProviders: settingsApi.SettingsResponseData = {
+        ai_enabled: true,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+        ai_providers_config: {
+          gemini: { has_api_key: true, ai_api_key: '********', ai_model: 'gemini-3.7-flash', ai_fallback_models: 'gemini-2.5-flash', ai_base_url: null },
+          openai: { has_api_key: false, ai_api_key: '', ai_model: 'gpt-4o', ai_fallback_models: '', ai_base_url: null },
+        },
+      };
+
+      beforeEach(() => {
+        vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviders);
+        vi.spyOn(aiApi, 'getAiModels').mockImplementation(async (provider) => ({
+          provider: provider ?? 'gemini',
+          models: [],
+          has_api_key: provider === 'gemini',
+          cached_at: null,
+          is_live: true,
+        }));
+      });
+
+      it('a provider switch sends the new provider with its fields, so the single stored values follow it', async () => {
+        const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+        render(<SettingsPanel />);
+        await waitFor(() => {
+          expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
+        });
+        chooseOption(screen.getByLabelText('AI Provider'), 'OpenAI');
+        fireEvent.click(await screen.findByRole('button', { name: /Save Changes/i }));
+        await waitFor(() => {
+          expect(updateSpy).toHaveBeenCalledWith({
+            ai_provider: 'openai',
+            ai_model: 'gpt-4o',
+            ai_fallback_models: '',
+            ai_base_url: '',
+            ai_api_key: '',
+          });
+        });
+      });
+
+      it('an edit to a provider that is not selected goes in its own entry, with that field only', async () => {
+        const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+        render(<SettingsPanel />);
+        await waitFor(() => {
+          expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
+        });
+        chooseOption(screen.getByLabelText('AI Provider'), 'OpenAI');
+        fireEvent.change(await screen.findByPlaceholderText('Enter API key'), { target: { value: 'sk-new-key' } });
+        chooseOption(screen.getByLabelText('AI Provider'), 'Google Gemini');
+        await waitFor(() => {
+          expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
+        });
+        fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+        await waitFor(() => {
+          expect(updateSpy).toHaveBeenCalledWith({ ai_providers_config: { openai: { ai_api_key: 'sk-new-key' } } });
+        });
+      });
+    });
+
     it('clearing the API key and leaving the field only marks the form dirty; Save then clears the stored key', async () => {
       const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
@@ -1089,12 +1146,8 @@ describe('SettingsPanel Component', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
       await waitFor(() => {
-        expect(updateSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            ai_provider: 'gemini',
-            ai_api_key: '',
-          })
-        );
+        // Only the emptied key is sent: the provider did not change
+        expect(updateSpy).toHaveBeenCalledWith({ ai_api_key: '' });
       });
     });
 
@@ -1282,9 +1335,8 @@ describe('SettingsPanel Component', () => {
       await waitFor(() => {
         expect(updateSpy).toHaveBeenCalled();
       });
-      const payload = updateSpy.mock.calls[0][0] as any;
-      expect(payload.ai_base_url).toBe('');
-      expect(payload.ai_providers_config.openai_compatible.ai_base_url).toBe('');
+      // The selected provider's change goes at the top level, and nothing else is sent
+      expect(updateSpy.mock.calls[0][0]).toEqual({ ai_base_url: '' });
     });
 
     it('tells the user when the API key was cleared because the endpoint changed', async () => {
@@ -1331,9 +1383,7 @@ describe('SettingsPanel Component', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
       await waitFor(() => {
-        expect(updateSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ internal_log_level: 'ERROR', ai_api_key: '' })
-        );
+        expect(updateSpy).toHaveBeenCalledWith({ internal_log_level: 'ERROR', ai_api_key: '' });
       });
       expect(updateSpy).toHaveBeenCalledTimes(1);
     });

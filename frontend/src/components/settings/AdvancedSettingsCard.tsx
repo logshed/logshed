@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Sliders,
   Cpu,
@@ -13,6 +13,7 @@ import { AiThinkingLevel, SystemSettings } from '../../types.ts';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { updateSettings } from '../../api/settings.ts';
 import { useFlash } from '../../utils/hooks.ts';
+import { useSavedForm } from './useSavedForm.ts';
 
 const DEFAULT_THINKING_LEVEL: AiThinkingLevel = 'low';
 
@@ -22,6 +23,42 @@ const THINKING_LEVEL_OPTIONS: { value: AiThinkingLevel; label: string }[] = [
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
 ];
+
+interface AdvancedValues {
+  ai_timeout: number;
+  ai_thinking_level: AiThinkingLevel;
+  app_url: string;
+  allow_private_notification_targets: boolean;
+  trusted_proxies: string;
+  trust_docker_proxies: boolean;
+  cookie_secure: boolean;
+  syslog_max_tcp_connections: number;
+  syslog_tcp_inactivity_timeout: number;
+}
+
+const ADVANCED_DEFAULTS: AdvancedValues = {
+  ai_timeout: 45.0,
+  ai_thinking_level: DEFAULT_THINKING_LEVEL,
+  app_url: '',
+  allow_private_notification_targets: true,
+  trusted_proxies: '',
+  trust_docker_proxies: false,
+  cookie_secure: false,
+  syslog_max_tcp_connections: 250,
+  syslog_tcp_inactivity_timeout: 0.0,
+};
+
+const advancedValues = (s: SystemSettings): AdvancedValues => ({
+  ai_timeout: s.ai_timeout ?? ADVANCED_DEFAULTS.ai_timeout,
+  ai_thinking_level: s.ai_thinking_level ?? ADVANCED_DEFAULTS.ai_thinking_level,
+  app_url: s.app_url ?? '',
+  allow_private_notification_targets: s.allow_private_notification_targets ?? true,
+  trusted_proxies: s.trusted_proxies ?? '',
+  trust_docker_proxies: s.trust_docker_proxies ?? false,
+  cookie_secure: s.cookie_secure ?? false,
+  syslog_max_tcp_connections: s.syslog_max_tcp_connections ?? 250,
+  syslog_tcp_inactivity_timeout: s.syslog_tcp_inactivity_timeout ?? 0.0,
+});
 
 export interface AdvancedSettingsCardProps {
   settings: SystemSettings | null;
@@ -36,16 +73,23 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   onDirtyChange,
   saveTriggerRef,
 }) => {
-  // Form state
-  const [aiTimeout, setAiTimeout] = useState<number>(45.0);
-  const [aiThinkingLevel, setAiThinkingLevel] = useState<AiThinkingLevel>(DEFAULT_THINKING_LEVEL);
-  const [appUrl, setAppUrl] = useState<string>('');
-  const [allowPrivate, setAllowPrivate] = useState<boolean>(true);
-  const [trustedProxies, setTrustedProxies] = useState<string>('');
-  const [trustDockerProxies, setTrustDockerProxies] = useState<boolean>(false);
-  const [cookieSecure, setCookieSecure] = useState<boolean>(false);
-  const [syslogMaxTcpConnections, setSyslogMaxTcpConnections] = useState<number>(250);
-  const [syslogTcpInactivityTimeout, setSyslogTcpInactivityTimeout] = useState<number>(0.0);
+  const savedValues = useMemo(() => (settings ? advancedValues(settings) : null), [settings]);
+  const form = useSavedForm<AdvancedValues>(savedValues, ADVANCED_DEFAULTS, {
+    app_url: (v) => v.trim(),
+    trusted_proxies: (v) => v.trim(),
+  });
+  const {
+    ai_timeout: aiTimeout,
+    ai_thinking_level: aiThinkingLevel,
+    app_url: appUrl,
+    allow_private_notification_targets: allowPrivate,
+    trusted_proxies: trustedProxies,
+    trust_docker_proxies: trustDockerProxies,
+    cookie_secure: cookieSecure,
+    syslog_max_tcp_connections: syslogMaxTcpConnections,
+    syslog_tcp_inactivity_timeout: syslogTcpInactivityTimeout,
+  } = form.values;
+  const isDirty = form.isDirty;
 
   // Status state
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -53,51 +97,12 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   const [savedFlash, flashSaved, setSavedFlash] = useFlash<true>(3000);
   const saveInlineSuccess = savedFlash !== null;
 
-  // Populate from settings
-  useEffect(() => {
-    if (settings) {
-      setAiTimeout(settings.ai_timeout ?? 45.0);
-      setAiThinkingLevel(settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL);
-      setAppUrl(settings.app_url ?? '');
-      setAllowPrivate(settings.allow_private_notification_targets ?? true);
-      setTrustedProxies(settings.trusted_proxies ?? '');
-      setTrustDockerProxies(settings.trust_docker_proxies ?? false);
-      setCookieSecure(settings.cookie_secure ?? false);
-      setSyslogMaxTcpConnections(settings.syslog_max_tcp_connections ?? 250);
-      setSyslogTcpInactivityTimeout(settings.syslog_tcp_inactivity_timeout ?? 0.0);
-    }
-  }, [settings]);
-
-  // Dirty state calculation
-  const isDirty = Boolean(
-    settings && (
-      aiTimeout !== (settings.ai_timeout ?? 45.0) ||
-      aiThinkingLevel !== (settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL) ||
-      appUrl.trim() !== (settings.app_url ?? '') ||
-      allowPrivate !== (settings.allow_private_notification_targets ?? true) ||
-      trustedProxies.trim() !== (settings.trusted_proxies ?? '') ||
-      trustDockerProxies !== (settings.trust_docker_proxies ?? false) ||
-      cookieSecure !== (settings.cookie_secure ?? false) ||
-      syslogMaxTcpConnections !== (settings.syslog_max_tcp_connections ?? 250) ||
-      syslogTcpInactivityTimeout !== (settings.syslog_tcp_inactivity_timeout ?? 0.0)
-    )
-  );
-
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
   const handleReset = () => {
-    if (!settings) return;
-    setAiTimeout(settings.ai_timeout ?? 45.0);
-    setAiThinkingLevel(settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL);
-    setAppUrl(settings.app_url ?? '');
-    setAllowPrivate(settings.allow_private_notification_targets ?? true);
-    setTrustedProxies(settings.trusted_proxies ?? '');
-    setTrustDockerProxies(settings.trust_docker_proxies ?? false);
-    setCookieSecure(settings.cookie_secure ?? false);
-    setSyslogMaxTcpConnections(settings.syslog_max_tcp_connections ?? 250);
-    setSyslogTcpInactivityTimeout(settings.syslog_tcp_inactivity_timeout ?? 0.0);
+    form.reset();
     setSaveInlineError(null);
     setSavedFlash(null);
   };
@@ -123,37 +128,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
       return false;
     }
 
-    const updates: Partial<SystemSettings> = {};
-    if (aiTimeout !== (settings.ai_timeout ?? 45.0)) {
-      updates.ai_timeout = aiTimeout;
-    }
-    if (aiThinkingLevel !== (settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL)) {
-      updates.ai_thinking_level = aiThinkingLevel;
-    }
-    const trimmedAppUrl = appUrl.trim();
-    if (trimmedAppUrl !== (settings.app_url ?? '')) {
-      updates.app_url = trimmedAppUrl;
-    }
-    if (allowPrivate !== (settings.allow_private_notification_targets ?? true)) {
-      updates.allow_private_notification_targets = allowPrivate;
-    }
-    const trimmedProxies = trustedProxies.trim();
-    if (trimmedProxies !== (settings.trusted_proxies ?? '')) {
-      updates.trusted_proxies = trimmedProxies;
-    }
-    if (trustDockerProxies !== (settings.trust_docker_proxies ?? false)) {
-      updates.trust_docker_proxies = trustDockerProxies;
-    }
-    if (cookieSecure !== (settings.cookie_secure ?? false)) {
-      updates.cookie_secure = cookieSecure;
-    }
-    if (syslogMaxTcpConnections !== (settings.syslog_max_tcp_connections ?? 250)) {
-      updates.syslog_max_tcp_connections = syslogMaxTcpConnections;
-    }
-    if (syslogTcpInactivityTimeout !== (settings.syslog_tcp_inactivity_timeout ?? 0.0)) {
-      updates.syslog_tcp_inactivity_timeout = syslogTcpInactivityTimeout;
-    }
-
+    const updates: Partial<SystemSettings> = form.changes();
     if (Object.keys(updates).length === 0) {
       return true;
     }
@@ -214,7 +189,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               min={5}
               step={5}
               value={aiTimeout}
-              onChange={(e) => setAiTimeout(parseFloat(e.target.value) || 5)}
+              onChange={(e) => form.set('ai_timeout', parseFloat(e.target.value) || 5)}
               required
               mono
             />
@@ -229,7 +204,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                   label="Thinking Level"
                   options={THINKING_LEVEL_OPTIONS}
                   value={aiThinkingLevel}
-                  onChange={(v) => setAiThinkingLevel(v as AiThinkingLevel)}
+                  onChange={(v) => form.set('ai_thinking_level', v as AiThinkingLevel)}
                 />
               )}
             </Field>
@@ -253,7 +228,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               type="text"
               placeholder="https://logs.example.com"
               value={appUrl}
-              onChange={(e) => setAppUrl(e.target.value)}
+              onChange={(e) => form.set('app_url', e.target.value)}
               mono
             />
 
@@ -261,7 +236,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               <Checkbox
                 label="Allow Local / LAN Webhook Targets"
                 checked={allowPrivate}
-                onChange={(e) => setAllowPrivate(e.target.checked)}
+                onChange={(e) => form.set('allow_private_notification_targets', e.target.checked)}
               />
               <p className="text-[11px] text-fg-muted mt-1 pl-6">
                 Permits webhooks targeting private IPv4/IPv6 ranges (e.g. local Gotify or Home Assistant).
@@ -284,7 +259,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               type="text"
               placeholder="10.0.0.0/8, 192.168.1.1"
               value={trustedProxies}
-              onChange={(e) => setTrustedProxies(e.target.value)}
+              onChange={(e) => form.set('trusted_proxies', e.target.value)}
               mono
             />
 
@@ -293,7 +268,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 <Checkbox
                   label="Trust Docker Bridge Networks"
                   checked={trustDockerProxies}
-                  onChange={(e) => setTrustDockerProxies(e.target.checked)}
+                  onChange={(e) => form.set('trust_docker_proxies', e.target.checked)}
                 />
                 <p className="text-[11px] text-fg-muted mt-1 pl-6">
                   Trusts private Docker subnet 172.16.0.0/12 as reverse proxy gateways.
@@ -304,7 +279,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 <Checkbox
                   label="Force Secure Session Cookies"
                   checked={cookieSecure}
-                  onChange={(e) => setCookieSecure(e.target.checked)}
+                  onChange={(e) => form.set('cookie_secure', e.target.checked)}
                 />
                 <p className="text-[11px] text-fg-muted mt-1 pl-6">
                   Applies immediately to inbound client IP extraction and session cookie generation.
@@ -327,7 +302,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               type="number"
               min={1}
               value={syslogMaxTcpConnections}
-              onChange={(e) => setSyslogMaxTcpConnections(parseInt(e.target.value, 10) || 1)}
+              onChange={(e) => form.set('syslog_max_tcp_connections', parseInt(e.target.value, 10) || 1)}
               required
               mono
             />
@@ -339,7 +314,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               min={0}
               step={5}
               value={syslogTcpInactivityTimeout}
-              onChange={(e) => setSyslogTcpInactivityTimeout(parseFloat(e.target.value) || 0.0)}
+              onChange={(e) => form.set('syslog_tcp_inactivity_timeout', parseFloat(e.target.value) || 0.0)}
               required
               mono
             />

@@ -293,30 +293,43 @@ export function useAiProviderConfig(settings: SettingsResponseData | null) {
     await loadModels(aiProvider, true, keyToSend, urlToSend);
   };
 
-  /** The AI fields of a settings save. */
-  const buildSavePayload = () => {
-    const updatedProvidersConfig: Record<string, any> = {};
-    for (const [p, cfg] of Object.entries(providerConfigs)) {
-      const isCurrent = p === aiProvider;
-      updatedProvidersConfig[p] = {
-        has_api_key: isCurrent ? (Boolean(aiApiKey) || hasApiKeyForProvider) : cfg.hasKey,
-        ai_api_key: isCurrent ? aiApiKey : cfg.apiKey,
-        ai_model: isCurrent ? aiModel : cfg.model,
-        ai_fallback_models: isCurrent ? aiFallbackModels : cfg.fallbackModels,
-        // An emptied base URL is sent as '' so the server clears it (null would keep the old one).
-        ai_base_url: isCurrent ? aiBaseUrl.trim() : cfg.baseUrl.trim(),
-      };
+  /**
+   * The AI fields of a settings save: only what differs from the saved settings. The selected
+   * provider's fields go at the top level, which the server also stores as the single values older
+   * versions read; when the provider itself changes, all four go, so those values follow it. Other
+   * providers go in ai_providers_config with their changed fields only. An emptied base URL is
+   * sent as '' so the server clears it; a key left as the masked placeholder is not sent at all.
+   */
+  const buildChangedPayload = (): Record<string, unknown> => {
+    if (!settings || !baselineProviders) return {};
+    const out: Record<string, unknown> = {};
+    if (aiEnabled !== settingsAiEnabled(settings)) out.ai_enabled = aiEnabled;
+    if (normalizePrompt(aiSystemPrompt) !== normalizePrompt(settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT)) {
+      out.ai_system_prompt = aiSystemPrompt;
     }
-    return {
-      ai_enabled: aiEnabled,
-      ai_provider: aiProvider,
-      ai_model: aiModel,
-      ai_fallback_models: aiFallbackModels,
-      ai_api_key: aiApiKey,
-      ai_base_url: aiBaseUrl.trim(),
-      ai_system_prompt: aiSystemPrompt,
-      ai_providers_config: updatedProvidersConfig,
+
+    const live: Record<string, ProviderLocalState> = {
+      ...providerConfigs,
+      [aiProvider]: { apiKey: aiApiKey, hasKey: hasApiKeyForProvider, model: aiModel, fallbackModels: aiFallbackModels, baseUrl: aiBaseUrl },
     };
+    const providerChanged = aiProvider !== settings.ai_provider;
+    const others: Record<string, Record<string, string>> = {};
+    for (const [p, cfg] of Object.entries(live)) {
+      const base = baselineProviders.configs[p];
+      if (!base) continue;
+      const fields: Record<string, string> = {};
+      const allFields = p === aiProvider && providerChanged;
+      if (allFields || cfg.model !== base.model) fields.ai_model = cfg.model;
+      if (allFields || cfg.fallbackModels !== base.fallbackModels) fields.ai_fallback_models = cfg.fallbackModels;
+      if (allFields || cfg.baseUrl.trim() !== base.baseUrl.trim()) fields.ai_base_url = cfg.baseUrl.trim();
+      if ((allFields || cfg.apiKey !== base.apiKey) && cfg.apiKey !== MASKED_SECRET) fields.ai_api_key = cfg.apiKey;
+      if (Object.keys(fields).length === 0) continue;
+      if (p === aiProvider) Object.assign(out, fields);
+      else others[p] = fields;
+    }
+    if (providerChanged) out.ai_provider = aiProvider;
+    if (Object.keys(others).length > 0) out.ai_providers_config = others;
+    return out;
   };
 
   return {
@@ -349,7 +362,7 @@ export function useAiProviderConfig(settings: SettingsResponseData | null) {
     handlePrimaryModelChange,
     promoteFirstFallback,
     refreshModels,
-    buildSavePayload,
+    buildChangedPayload,
   };
 }
 

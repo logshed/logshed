@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Settings,
   AlertCircle,
@@ -28,6 +28,7 @@ import { AiProviderCard } from './AiProviderCard.tsx';
 import { StickySaveBar } from './StickySaveBar.tsx';
 import { AboutCard } from './AboutCard.tsx';
 import { ChangePasswordCard } from './ChangePasswordCard.tsx';
+import { useSavedForm } from './useSavedForm.ts';
 
 
 export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
@@ -71,6 +72,31 @@ export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
       return '/settings/app';
   }
 };
+
+/** The Application tab's own fields (the AI provider has its own hook). */
+interface AppFormValues {
+  internal_log_level: string;
+  check_for_updates: boolean;
+  daily_digest_enabled: boolean;
+  daily_digest_channel_id: number | null;
+  daily_digest_schedule_time: string;
+}
+
+const APP_FORM_DEFAULTS: AppFormValues = {
+  internal_log_level: 'WARNING',
+  check_for_updates: true,
+  daily_digest_enabled: false,
+  daily_digest_channel_id: null,
+  daily_digest_schedule_time: '09:00',
+};
+
+const appFormValues = (s: SettingsResponseData): AppFormValues => ({
+  internal_log_level: s.internal_log_level || 'WARNING',
+  check_for_updates: s.check_for_updates ?? true,
+  daily_digest_enabled: Boolean(s.daily_digest_enabled),
+  daily_digest_channel_id: s.daily_digest_channel_id ?? null,
+  daily_digest_schedule_time: s.daily_digest_schedule_time || '09:00',
+});
 
 const INTERNAL_LOG_LEVEL_OPTIONS: SelectOption[] = [
   { value: 'WARNING', label: 'WARNING (Default - warnings & errors)' },
@@ -138,11 +164,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Form states
   const ai = useAiProviderConfig(settings);
-  const [internalLogLevel, setInternalLogLevel] = useState<string>('WARNING');
-  const [checkForUpdates, setCheckForUpdates] = useState<boolean>(true);
-  const [digestEnabled, setDigestEnabled] = useState<boolean>(false);
-  const [digestChannelId, setDigestChannelId] = useState<number | null>(null);
-  const [digestScheduleTime, setDigestScheduleTime] = useState<string>('09:00');
+  const savedAppValues = useMemo(() => (settings ? appFormValues(settings) : null), [settings]);
+  const appForm = useSavedForm<AppFormValues>(savedAppValues, APP_FORM_DEFAULTS, {
+    daily_digest_schedule_time: (v) => v.trim() || '09:00',
+  });
+  const {
+    internal_log_level: internalLogLevel,
+    check_for_updates: checkForUpdates,
+    daily_digest_enabled: digestEnabled,
+    daily_digest_channel_id: digestChannelId,
+    daily_digest_schedule_time: digestScheduleTime,
+  } = appForm.values;
+  const setAppField = appForm.set;
   const serverTimezone = settings?.server_timezone || undefined;
 
   // Save feedback state
@@ -153,42 +186,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const saveNotice = savedFlash?.notice ?? null;
   const [saveInlineError, setSaveInlineError] = useState<string | null>(null);
 
-  // Track dirty state against loaded baseline settings
-  const baselineDigestEnabled = settings ? Boolean(settings.daily_digest_enabled) : false;
-  const baselineDigestChannelId = settings ? (settings.daily_digest_channel_id ?? null) : null;
-  const baselineDigestScheduleTime = settings ? (settings.daily_digest_schedule_time || '09:00') : '09:00';
-
-  const isDirty = Boolean(
-    settings &&
-    (ai.isDirty ||
-      internalLogLevel !== (settings.internal_log_level || 'WARNING') ||
-      checkForUpdates !== (settings.check_for_updates ?? true) ||
-      digestEnabled !== baselineDigestEnabled ||
-      digestChannelId !== baselineDigestChannelId ||
-      digestScheduleTime !== baselineDigestScheduleTime)
-  );
+  const isDirty = Boolean(settings && (ai.isDirty || appForm.isDirty));
   const isDirtyRef = useRef<boolean>(false);
   isDirtyRef.current = isDirty;
 
   // Application version & update state
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
 
+  // The App tab's own fields follow the saved settings wherever they are not edited (useSavedForm);
+  // the AI provider form is replaced as a whole.
   const applySettingsResponse = (settRes: SettingsResponseData) => {
     setSettings(settRes);
     ai.applySettings(settRes);
-    setInternalLogLevel(settRes.internal_log_level || 'WARNING');
-    setCheckForUpdates(settRes.check_for_updates ?? true);
-    setDigestEnabled(Boolean(settRes.daily_digest_enabled));
-    setDigestChannelId(settRes.daily_digest_channel_id ?? null);
-    setDigestScheduleTime(settRes.daily_digest_schedule_time || '09:00');
   };
 
   // Child tabs (API & MCP, Advanced, notifications) save their own settings. They only refresh
-  // the baseline: the App tab form is replaced from the server only when it has no edits of its own.
+  // the baseline: an App tab field keeps an unsaved edit, and the AI provider form is replaced
+  // only when it has no edits of its own.
+  const aiDirtyRef = useRef<boolean>(false);
+  aiDirtyRef.current = ai.isDirty;
   const refreshBaseline = async () => {
     try {
       const settRes = await fetchSettings(true);
-      if (isDirtyRef.current) {
+      if (aiDirtyRef.current) {
         setSettings(settRes);
       } else {
         applySettingsResponse(settRes);
@@ -303,6 +323,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleResetChanges = () => {
     if (!settings) return;
     applySettingsResponse(settings);
+    appForm.reset();
     ai.resetModelPickers();
 
     if (settingsAiEnabled(settings) && ai.aiProvider !== settings.ai_provider) {
@@ -326,13 +347,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         return false;
       }
 
+      // Only what changed is sent, so a save never writes back a value changed elsewhere since
+      // this page loaded (another tab, or another browser).
+      const appChanges = appForm.changes();
       const saveRes = await updateSettings({
-        ...ai.buildSavePayload(),
-        internal_log_level: internalLogLevel,
-        check_for_updates: checkForUpdates,
-        daily_digest_enabled: digestEnabled,
-        daily_digest_channel_id: digestChannelId,
-        daily_digest_schedule_time: digestScheduleTime ? digestScheduleTime.trim() : '09:00',
+        ...ai.buildChangedPayload(),
+        ...appChanges,
       });
 
       // Reload updated settings as baseline
@@ -344,8 +364,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ai.loadModels(settRes.ai_provider);
       }
 
-      // Refresh version info to reflect updated check_for_updates setting
-      loadVersionData(true);
+      if (appChanges.check_for_updates !== undefined) {
+        loadVersionData(true);
+      }
 
       const keyCleared = Boolean(saveRes && saveRes.ai_api_key_cleared);
       flashSaved(
@@ -469,7 +490,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   label="Internal Log Severity Threshold"
                   options={INTERNAL_LOG_LEVEL_OPTIONS}
                   value={internalLogLevel}
-                  onChange={setInternalLogLevel}
+                  onChange={(v) => setAppField('internal_log_level', v)}
                 />
               )}
             </Field>
@@ -489,11 +510,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           settings={settings}
           onSettingsSaved={refreshBaseline}
           digestEnabled={digestEnabled}
-          onDigestEnabledChange={setDigestEnabled}
+          onDigestEnabledChange={(v) => setAppField('daily_digest_enabled', v)}
           digestChannelId={digestChannelId}
-          onDigestChannelIdChange={setDigestChannelId}
+          onDigestChannelIdChange={(v) => setAppField('daily_digest_channel_id', v)}
           digestScheduleTime={digestScheduleTime}
-          onDigestScheduleTimeChange={setDigestScheduleTime}
+          onDigestScheduleTimeChange={(v) => setAppField('daily_digest_schedule_time', v)}
           isSavingSettings={isSavingSettings}
         />
 
@@ -509,7 +530,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <Checkbox
               label="Check for new versions"
               checked={checkForUpdates}
-              onChange={(e) => setCheckForUpdates(e.target.checked)}
+              onChange={(e) => setAppField('check_for_updates', e.target.checked)}
             />
             <p className="text-xs text-fg-muted mt-1 pl-6">
               When disabled, LogShed will not query external registries or display update notifications.

@@ -294,19 +294,23 @@ async def update_settings(
                 p_clean = (p or "").lower().strip()
                 if not p_clean:
                     continue
-                if p_cfg.ai_model is not None:
+                # A field left out of a provider's entry keeps its stored value: the settings page
+                # sends only what changed, and the model's defaults ("" for the key and the
+                # fallback models) would otherwise clear them.
+                sent = p_cfg.model_fields_set
+                if "ai_model" in sent and p_cfg.ai_model is not None:
                     updates.append((f"ai_model_{p_clean}", _model_to_store(p_clean, p_cfg.ai_model), 0))
                     if p_clean == target_provider and req.ai_model is None:
                         updates.append(("ai_model", _model_to_store(p_clean, p_cfg.ai_model), 0))
-                if p_cfg.ai_fallback_models is not None:
+                if "ai_fallback_models" in sent and p_cfg.ai_fallback_models is not None:
                     updates.append((f"ai_fallback_models_{p_clean}", p_cfg.ai_fallback_models, 0))
                     if p_clean == target_provider and req.ai_fallback_models is None:
                         updates.append(("ai_fallback_models", p_cfg.ai_fallback_models, 0))
-                if p_cfg.ai_base_url is not None:
+                if "ai_base_url" in sent and p_cfg.ai_base_url is not None:
                     updates.append((f"ai_base_url_{p_clean}", p_cfg.ai_base_url, 0))
                     if p_clean == target_provider and req.ai_base_url is None:
                         updates.append(("ai_base_url", p_cfg.ai_base_url, 0))
-                if not keeps_stored_secret(p_cfg.ai_api_key):
+                if "ai_api_key" in sent and not keeps_stored_secret(p_cfg.ai_api_key):
                     if p_cfg.ai_api_key == "":
                         updates.append((f"ai_api_key_{p_clean}", "", 1))
                         if p_clean == target_provider and req.ai_api_key is None:
@@ -369,9 +373,9 @@ async def update_settings(
         if req.enable_mcp is not None:
             updates.append(("enable_mcp", "1" if req.enable_mcp else "0", 0))
 
-        # The Application tab sends every digest field on every save, so compare with the stored
-        # values: only a real change restarts the schedule (the first digest is then the next
-        # occurrence of the schedule time) and a repeated save keeps the downtime catch-up.
+        # A client may send digest fields that did not change, so compare with the stored values:
+        # only a real change restarts the schedule (the first digest is then the next occurrence
+        # of the schedule time) and a repeated save keeps the downtime catch-up.
         if req.daily_digest_enabled is not None or req.daily_digest_schedule_time is not None:
             cursor.execute(
                 "SELECT key, value FROM system_settings "
