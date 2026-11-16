@@ -19,12 +19,14 @@ from app.models import (
     LogDeletePreviewResponse,
     LogDeleteRequest,
     LogDeleteResponse,
+    LogExportRequest,
     LogFacetsResponse,
     LogListResponse,
 )
 from app.core.utils import AliasIndex, parse_multi_values
 from app.services.log_facets import get_facets
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
+from app.services.log_export import check_export_ids, export_logs
 from app.services import log_store
 from app.services.log_query import (
     InvalidTimeBound,
@@ -296,3 +298,32 @@ async def preview_delete_logs(
         )
     except sqlite3.OperationalError as exc:
         raise db_busy_exception(exc, "counting logs to delete")
+
+
+@router.post("/export")
+async def export_logs_route(
+    body: LogExportRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> StreamingResponse:
+    """
+    Download the logs of the Console's search (or its ticked rows) as CSV or NDJSON, newest
+    first, at most 100,000. X-LogShed-Export-Rows says how many follow, and
+    X-LogShed-Export-Capped whether the search matched more.
+    """
+    has_filters = bool(body.query or body.sources or body.apps or body.severity_max is not None or body.from_ or body.to)
+    check_export_ids(body.log_ids, has_filters)
+    check_ui_filter_value_counts(source=body.sources, app_name=body.apps)
+    try:
+        log_filter = LogFilter.parse(
+            query=body.query,
+            sources=body.sources,
+            apps=body.apps,
+            severity_max=body.severity_max,
+            from_=body.from_,
+            to=body.to,
+            log_ids=body.log_ids,
+        )
+    except InvalidTimeBound as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return await export_logs(log_filter, body.format, body.mask_secrets, request)

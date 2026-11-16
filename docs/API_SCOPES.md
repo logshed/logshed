@@ -22,7 +22,7 @@ Tokens are managed in **Settings > API & MCP Access**.
 
 | Scope | What the token can do | Typical use |
 |---|---|---|
-| `logs:read` | Search, count and read logs and the lines around them, and list the hosts and apps that send logs. Also required to connect an AI assistant over MCP. | Dashboards, scripts that check for errors, AI assistants |
+| `logs:read` | Search, count, read and download logs and the lines around them, and list the hosts and apps that send logs. Also required to connect an AI assistant over MCP. | Dashboards, scripts that check for errors, AI assistants |
 | `logs:write` | Send logs to LogShed through the HTTP ingest API (`POST /api/v1/ingest`). | Vector, Fluent Bit, scripts that push their own logs |
 | `alerts:read` | Read alert and incident history, including past maintenance windows. | Dashboards, AI assistants investigating an incident |
 | `system:read` | Read system metrics (log rates, error counts, queue and storage figures), the installed version and whether an update is available. | Home Assistant, status pages, AI assistants |

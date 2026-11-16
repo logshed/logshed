@@ -1,8 +1,8 @@
 import React from 'react';
-import { Bookmark, Box, Clock, Pause, Play, Server, Trash2 } from 'lucide-react';
+import { Bookmark, Box, Clock, Download, Pause, Play, Server, Trash2 } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
-import { buttonClass } from '../common/Button.tsx';
+import { buttonClass, IconButton } from '../common/Button.tsx';
 import { HostName, selfReportedTitle } from './HostName.tsx';
 
 interface StreamToolbarProps {
@@ -31,6 +31,8 @@ interface StreamToolbarProps {
   autoScroll: boolean;
   onToggleAutoScroll: () => void;
   onClearBuffer: () => void;
+  /** Opens the Download Logs dialog for the current search (phones have it in the filter drawer). */
+  onDownload: () => void;
 }
 
 /**
@@ -59,6 +61,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
   autoScroll,
   onToggleAutoScroll,
   onClearBuffer,
+  onDownload,
 }) => (
   <>
     {/* Left: Quick Filter Pills */}
@@ -204,6 +207,11 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
       )}
 
       {/* Left out on phones to leave room for the quick filters */}
+      {!isMobile && (
+        <IconButton label="Download logs of this search" size="sm" onClick={onDownload}>
+          <Download className="w-3.5 h-3.5" />
+        </IconButton>
+      )}
       {!isMobile && (
         <button
           onClick={onClearBuffer}

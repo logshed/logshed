@@ -286,6 +286,7 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
   ['GET', /^\/api\/logs\/(\d+)\/context$/, (m, q) => logContext(Number(m[1]), q)],
   ['DELETE', /^\/api\/logs\/\d+$/, () => { throw notInDemo('Deleting logs'); }],
   ['POST', /^\/api\/logs\/delete(\/preview)?$/, () => { throw notInDemo('Deleting logs'); }],
+  ['POST', /^\/api\/logs\/export$/, () => { throw notInDemo('Downloading logs'); }],
   ['GET', /^\/api\/ai\/models$/, () => ({
     provider: settings.ai_provider, has_api_key: true, is_live: false, cached_at: null,
     models: [

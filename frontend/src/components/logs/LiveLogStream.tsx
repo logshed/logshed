@@ -43,6 +43,7 @@ import { useQuickFilterChips } from './useQuickFilterChips.ts';
 import { StreamToolbar } from './StreamToolbar.tsx';
 import { SelectionActionBar } from './SelectionActionBar.tsx';
 import { DeleteSelectedDialog } from './DeleteSelectedDialog.tsx';
+import { DownloadLogsDialog, DownloadScope } from './DownloadLogsDialog.tsx';
 import { ConsoleEmptyKind, ConsoleEmptyState } from './ConsoleEmptyState.tsx';
 import { StreamLoadNote } from './StreamLoadNote.tsx';
 import { useSkippedNote } from './useSkippedNote.ts';
@@ -525,6 +526,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const filtersActive = useMemo(() => hasActiveLogFilters(filters), [filters]);
 
   const { selectedLogIds } = selection;
+  // The Download Logs dialog, and which logs it offers first; null while it is closed
+  const [downloadScope, setDownloadScope] = useState<DownloadScope | null>(null);
+  const selectedIdList = useMemo(() => Array.from(selectedLogIds), [selectedLogIds]);
   const selectedLogs = useMemo(() => {
     if (selectedLogIds.size === 0) return EMPTY_SELECTED_LOGS;
     return logs.filter((l) => selectedLogIds.has(l.id));
@@ -602,6 +606,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       autoScroll={autoScroll}
       onToggleAutoScroll={() => (autoScroll ? setAutoScroll(false) : buffer.resumeAutoScroll())}
       onClearBuffer={clearLogsBuffer}
+      onDownload={() => setDownloadScope('search')}
     />
   );
 
@@ -616,6 +621,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onFilterChange={handleFilterChange}
           onSearch={() => buffer.loadInitialLogs()}
           onReset={handleResetFilters}
+          onDownload={isMobile ? () => setDownloadScope('search') : undefined}
           availableSources={facets.availableSourcesForSelectedApps}
           availableApps={facets.availableAppsForSelectedHosts}
           onApplySavedView={handleApplySavedView}
@@ -826,6 +832,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onDeselectAll={selection.deselectAll}
           onDelete={() => setShowDeleteSelectedConfirm(true)}
           onAnalyze={handleLaunchAiAnalysis}
+          onDownload={() => setDownloadScope('selected')}
         />
       )}
 
@@ -900,6 +907,14 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           />
         </React.Suspense>
       )}
+
+      <DownloadLogsDialog
+        isOpen={downloadScope !== null}
+        onClose={() => setDownloadScope(null)}
+        filters={filters}
+        selectedIds={selectedIdList}
+        initialScope={downloadScope ?? 'search'}
+      />
 
       {/* Delete Selected Confirmation Modal */}
       {showDeleteSelectedConfirm && (

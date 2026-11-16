@@ -1,4 +1,4 @@
-import { apiFetch } from './client.ts';
+import { apiFetch, toApiError } from './client.ts';
 import {
   LogEntry,
   LogFilterParams,
@@ -25,16 +25,10 @@ export async function fetchLogs(
   if (params.severity_max !== undefined && params.severity_max !== null) {
     searchParams.set('severity_max', params.severity_max.toString());
   }
-  const sources: string[] = params.sources && params.sources.length > 0
-    ? params.sources
-    : (params.source ? (Array.isArray(params.source) ? params.source : [params.source]) : []);
+  const { sources, apps } = filterLists(params);
   if (sources.length > 0) {
     searchParams.set('source', sources.join(','));
   }
-
-  const apps: string[] = params.apps && params.apps.length > 0
-    ? params.apps
-    : (params.app_name ? (Array.isArray(params.app_name) ? params.app_name : [params.app_name]) : []);
   if (apps.length > 0) {
     searchParams.set('app_name', apps.join(','));
   }
@@ -45,6 +39,74 @@ export async function fetchLogs(
 
   const qs = searchParams.toString();
   return apiFetch<LogListResult>(`/api/logs${qs ? `?${qs}` : ''}`, options.signal ? { signal: options.signal } : {});
+}
+
+/** The host and app lists of a filter, from its list or its single-value field. */
+function filterLists(params: LogFilterParams): { sources: string[]; apps: string[] } {
+  const sources: string[] = params.sources && params.sources.length > 0
+    ? params.sources
+    : (params.source ? (Array.isArray(params.source) ? params.source : [params.source]) : []);
+  const apps: string[] = params.apps && params.apps.length > 0
+    ? params.apps
+    : (params.app_name ? (Array.isArray(params.app_name) ? params.app_name : [params.app_name]) : []);
+  return { sources, apps };
+}
+
+export type LogDownloadFormat = 'csv' | 'ndjson';
+
+/** Most logs one download holds (the newest); the server says when a search matched more. */
+export const LOG_DOWNLOAD_CAP = 100_000;
+
+export interface LogDownloadRequest {
+  format: LogDownloadFormat;
+  maskSecrets: boolean;
+  /** The ticked rows, downloaded alone; without them, the logs the filters select. */
+  logIds?: number[];
+  filters?: LogFilterParams;
+}
+
+export interface LogDownload {
+  blob: Blob;
+  filename: string;
+  /** How many logs the file holds, as the server counted them when it started. */
+  rows: number;
+  /** True when the search matched more than LOG_DOWNLOAD_CAP logs and only the newest are in the file. */
+  capped: boolean;
+}
+
+/** Downloads logs as CSV or NDJSON. Aborting the signal stops the server's search too. */
+export async function downloadLogs(request: LogDownloadRequest, signal?: AbortSignal): Promise<LogDownload> {
+  const body: Record<string, unknown> = { format: request.format, mask_secrets: request.maskSecrets };
+  if (request.logIds && request.logIds.length > 0) {
+    body.log_ids = request.logIds;
+  } else if (request.filters) {
+    const f = request.filters;
+    const { sources, apps } = filterLists(f);
+    if (f.query) body.query = f.query;
+    if (sources.length > 0) body.sources = sources;
+    if (apps.length > 0) body.apps = apps;
+    if (f.severity_max !== undefined && f.severity_max !== null) body.severity_max = f.severity_max;
+    if (f.from) body.from = f.from;
+    if (f.to) body.to = f.to;
+  }
+  const endpoint = '/api/logs/export';
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) throw await toApiError(response, endpoint);
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `logshed-logs.${request.format}`;
+  return {
+    // A download cut off part way rejects here, so a short file is never saved as if it were whole
+    blob: await response.blob(),
+    filename,
+    rows: Number(response.headers.get('X-LogShed-Export-Rows') ?? 0),
+    capped: response.headers.get('X-LogShed-Export-Capped') === 'true',
+  };
 }
 
 export async function fetchLogContext(

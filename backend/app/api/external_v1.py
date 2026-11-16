@@ -6,9 +6,10 @@ system telemetry and metrics, and log and incident queries.
 
 import datetime
 import logging
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import require_api_token, require_auth_or_token, run_db_query
 from app.api.system import run_prune_operation, run_vacuum_operation
@@ -37,6 +38,7 @@ from app.services.maintenance_service import (
 )
 from app.services import system_metrics
 from app.services.alert_history import list_alert_history, redact_alert_item
+from app.services.log_export import export_logs
 from app.services.log_facets import get_facets
 from app.services.log_search import (
     MAX_CURSOR_LENGTH,
@@ -264,6 +266,39 @@ async def count_logs_v1(
     log_filter = parse_api_log_filter(query, source, app_name, severity_max, severity, from_, to)
 
     return await count_logs(log_filter, group_by=group_by, group_limit=group_limit, request=request)
+
+
+@router.get(
+    "/logs/export",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "The logs, newest first, as a file download",
+            "content": {"text/csv": {}, "application/x-ndjson": {}},
+        }
+    },
+)
+async def export_logs_v1(
+    format: Literal["csv", "ndjson"] = Query("ndjson", description="csv or ndjson"),
+    query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
+    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip (up to 50 values)"),
+    app_name: Optional[list[str]] = Query(None, description="Filter by application name (up to 50 values)"),
+    severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0 - 7)"),
+    severity: Optional[str] = Query(None, description="Named severity (e.g. 'error', 'warning', 'info') or numeric code"),
+    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
+    to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
+    request: Request = None,  # type: ignore[assignment]
+    token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
+) -> StreamingResponse:
+    """
+    Download the logs matching the filters as NDJSON (one JSON object per line) or CSV, newest
+    first, at most 100,000, with raw text. Message and raw text pass through the redactor, as in
+    every other API response. X-LogShed-Export-Rows says how many follow, and
+    X-LogShed-Export-Capped whether more matched. A download that passes the 2-minute search
+    limit after it started is cut off without its end.
+    """
+    log_filter = parse_api_log_filter(query, source, app_name, severity_max, severity, from_, to)
+    return await export_logs(log_filter, format, True, request)
 
 
 @router.get("/logs/{log_id}/context", response_model=ExternalLogContextResponse, response_model_exclude_none=True)

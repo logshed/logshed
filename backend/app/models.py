@@ -148,6 +148,22 @@ class LogDeleteRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class LogExportRequest(BaseModel):
+    """The logs to download from the Console: its search filters, or the ticked rows alone."""
+    format: Literal["csv", "ndjson"] = Field("csv", description="csv or ndjson")
+    mask_secrets: bool = Field(False, description="Run the redactor over each message and raw text")
+    # The Console holds at most 20,000 rows, and its host and app lists at most 500 values each
+    log_ids: Optional[list[int]] = Field(None, max_length=20_000, description="The ticked rows (at most 20,000), sent without filters")
+    sources: Optional[list[str]] = Field(None, max_length=500, description="Filter by source_alias or source_ip")
+    apps: Optional[list[str]] = Field(None, max_length=500, description="Filter by app_name")
+    severity_max: Optional[int] = Field(None, ge=0, le=7, description="Max severity (0-7, lower is more severe)")
+    from_: Optional[str] = Field(None, alias="from", description="ISO datetime start filter or relative duration")
+    to: Optional[str] = Field(None, description="ISO datetime end filter or relative duration")
+    query: Optional[str] = Field(None, description="Full-text search query (FTS5)")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class LogDeleteResponse(BaseModel):
     """Result of log deletion operation."""
     status: str = "ok"

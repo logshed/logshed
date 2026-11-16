@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef, useId } from 'react';
-import { Search, RotateCcw, X, SlidersHorizontal, CircleHelp } from 'lucide-react';
+import { Search, RotateCcw, X, SlidersHorizontal, CircleHelp, Download } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
@@ -15,7 +15,7 @@ import {
 import { hostFilterList, appFilterList, withHosts, withApps } from '../../utils/filters.ts';
 import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
 import { SavedViewsState, useSavedViews, findActiveView } from './useSavedViews.ts';
-import { buttonClass } from '../common/Button.tsx';
+import { Button, buttonClass } from '../common/Button.tsx';
 
 // Time presets are stored as relative values (the backend resolves them at query time), so a saved
 // view or shared link keeps meaning "the last hour" instead of freezing the moment it was made.
@@ -104,6 +104,8 @@ interface LogSearchBarProps {
   onFilterChange: (filters: LogFilterParams) => void;
   onSearch: () => void;
   onReset: () => void;
+  /** Phones: a Download logs button in the filter drawer, which closes it and opens the dialog. */
+  onDownload?: () => void;
   availableSources?: string[];
   availableApps?: string[];
   onApplySavedView?: (filters: LogFilterParams) => void;
@@ -132,6 +134,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   onFilterChange,
   onSearch,
   onReset,
+  onDownload,
   availableSources = [],
   availableApps = [],
   onApplySavedView,
@@ -655,6 +658,20 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 Times in <span className="font-mono">{timeInputZoneLabel(timeZone)}</span>
               </p>
             </div>
+          )}
+
+          {onDownload && (
+            <Button
+              variant="secondary"
+              className="w-full"
+              icon={<Download className="w-3.5 h-3.5" aria-hidden="true" />}
+              onClick={() => {
+                setIsMobileDrawerOpen(false);
+                onDownload();
+              }}
+            >
+              Download logs
+            </Button>
           )}
 
           {/* Actions */}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, Sparkles, Trash2 } from 'lucide-react';
+import { AlertCircle, Download, Sparkles, Trash2 } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
 import { buttonClass } from '../common/Button.tsx';
@@ -10,6 +10,7 @@ interface SelectionActionBarProps {
   onDeselectAll: () => void;
   onDelete: () => void;
   onAnalyze: () => void;
+  onDownload: () => void;
 }
 
 /** The bar under the list while rows are ticked: how many and from which hosts, then the actions. */
@@ -19,6 +20,7 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
   onDeselectAll,
   onDelete,
   onAnalyze,
+  onDownload,
 }) => {
   const uniqueHosts = Array.from(new Set(selectedLogs.map((l) => l.source_alias || l.source_ip || 'unknown')));
   const overAiLimit = selectedLogs.length > SELECT_ALL_LIMIT;
@@ -57,6 +59,11 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
           className={buttonClass('secondary', 'md')}
         >
           Deselect All
+        </button>
+
+        <button onClick={onDownload} className={buttonClass('secondary', 'md')}>
+          <Download className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>Download ({selectedLogs.length})</span>
         </button>
 
         <button
