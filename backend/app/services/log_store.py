@@ -14,12 +14,15 @@ searches newest first, and ``fts_indexer`` keeps the full-text index up to date.
 """
 
 import bisect
+import collections
 import contextlib
 import dataclasses
 import datetime
+import functools
 import ipaddress
 import math
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional
@@ -70,6 +73,32 @@ def row_values(entry: dict) -> list:
         entry.get("message", ""),
         entry.get("raw", ""),
     ]
+
+
+# Counted up before and after every change to stored logs (deletes, prunes, relabels), so the
+# volume chart's remembered counts (_HISTOGRAM_CACHE) are never reused across a change
+_change_generation = 0
+_generation_lock = threading.Lock()
+
+
+def _bump_generation() -> None:
+    global _change_generation
+    with _generation_lock:
+        _change_generation += 1
+
+
+def _changes_logs(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Marks a function that changes stored logs: remembered chart counts from before it are not reused."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        _bump_generation()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _bump_generation()
+
+    return wrapper
 
 
 def _writes_day_files(conn: sqlite3.Connection) -> bool:
@@ -159,6 +188,7 @@ def _insert_one(conn: sqlite3.Connection, entry: dict) -> int:
     return rows[0][0]
 
 
+@_changes_logs
 def relabel_host(
     conn: sqlite3.Connection,
     source_ip: str,
@@ -230,6 +260,7 @@ def _host_ids_named(day_conn: sqlite3.Connection, name: str) -> list[int]:
     return [r[0] for r in day_conn.execute("SELECT id, name FROM hosts") if r[1].lower() == folded]
 
 
+@_changes_logs
 def hide_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: int = 1000) -> int:
     """
     An address got a configured alias: the names it reported are kept, hidden (the hosts id
@@ -248,6 +279,7 @@ def hide_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: in
     return total
 
 
+@_changes_logs
 def show_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: int = 1000) -> int:
     """
     An address's alias was deleted (its rows are named by the address again, relabel_host): the
@@ -301,6 +333,7 @@ def _is_address(name: str) -> bool:
     return True
 
 
+@_changes_logs
 def withdraw_reported_name(
     conn: sqlite3.Connection, name: str, keep_ip: Optional[str] = None, batch_size: int = 1000
 ) -> int:
@@ -327,6 +360,7 @@ def withdraw_reported_name(
     return total
 
 
+@_changes_logs
 def restore_reported_name(conn: sqlite3.Connection, name: str, batch_size: int = 1000) -> int:
     """
     No configured host uses name any more: rows whose sender reported it, shown under their
@@ -418,6 +452,7 @@ def _keyset_alias_backfill(
     return total
 
 
+@_changes_logs
 def relabel_docker_app(
     conn: sqlite3.Connection,
     raw_name: str,
@@ -491,6 +526,7 @@ def relabel_docker_app(
 _DELETE_ID_CHUNK = 500
 
 
+@_changes_logs
 def delete(
     conn: sqlite3.Connection,
     log_filter: LogFilter,
@@ -592,6 +628,7 @@ def _delete_ids(conn: sqlite3.Connection, log_ids: tuple[int, ...], between_batc
     return deleted
 
 
+@_changes_logs
 def delete_everything(conn: sqlite3.Connection, batch_size: int, between_batches: Callable[[], None]) -> int:
     """
     Delete every log stored when the delete starts; return how many went.
@@ -680,6 +717,7 @@ def count_prunable(conn: sqlite3.Connection, cutoff_iso: str) -> int:
     return total
 
 
+@_changes_logs
 def prune(
     conn: sqlite3.Connection,
     cutoff_iso: str,
@@ -714,6 +752,7 @@ def prune(
         between_batches()
 
 
+@_changes_logs
 def drop_empty_legacy(conn: sqlite3.Connection) -> bool:
     """
     Once retention (or a delete) has emptied the legacy logs table, drop it with its full-text
@@ -1201,14 +1240,81 @@ def histogram(conn: sqlite3.Connection, log_filter: LogFilter, edges: list[int])
         return buckets
     query = _PartQuery.prepare(conn, bounded)
     use_catalogue = step % 3600 == 0 and not (bounded.query or bounded.log_ids)
+    generation = _change_generation
     for part in found:
+        key = _histogram_cache_key(conn, part, query, edges, generation)
+        if key is not None:
+            with _histogram_cache_lock:
+                remembered = _HISTOGRAM_CACHE.get(key)
+                if remembered is not None:
+                    _HISTOGRAM_CACHE.move_to_end(key)
+            if remembered is not None:
+                for start_s, severity, cnt in remembered:
+                    add(start_s, severity, cnt)
+                continue
+        counted: list[tuple[int, int, int]] = []
+
+        def add_part(start_s: int, severity: int, cnt: int) -> None:
+            counted.append((start_s, severity, cnt))
+            add(start_s, severity, cnt)
+
         if use_catalogue and part.sealed and _catalogue_hosts_exact(conn, part, query.log_filter.sources):
-            _histogram_from_catalogue(conn, part, query, add)
+            _histogram_from_catalogue(conn, part, query, add_part)
         elif bounded.query:
-            _histogram_part(part, query, step, add)
+            _histogram_part(part, query, step, add_part)
         else:
-            _histogram_by_bar(part, query, edges, add)
+            _histogram_by_bar(part, query, edges, add_part)
+        if key is not None:
+            with _histogram_cache_lock:
+                _HISTOGRAM_CACHE[key] = counted
+                while len(_HISTOGRAM_CACHE) > HISTOGRAM_CACHE_SIZE:
+                    _HISTOGRAM_CACHE.popitem(last=False)
     return buckets
+
+
+# Counts of parts that do not change between refreshes (sealed day files, and the legacy table,
+# which takes no new logs), per filter and buckets. The chart refreshes every 10 to 60 s while the
+# Console follows new logs, and without this it recounted every past day each time: a host filter
+# on 30 days still in the legacy table took about a minute every time.
+HISTOGRAM_CACHE_SIZE = 512
+_HISTOGRAM_CACHE: "collections.OrderedDict[tuple, list[tuple[int, int, int]]]" = collections.OrderedDict()
+_histogram_cache_lock = threading.Lock()
+
+
+def _histogram_cache_key(
+    conn: sqlite3.Connection, part: day_store.Part, query: _PartQuery, edges: list[int], generation: int
+) -> Optional[tuple]:
+    """
+    The key a part's counts are remembered under, or None when they cannot be: a part still being
+    written, or search words on the legacy table (its full-text index may still be catching up
+    after an upgrade). The filter's time bounds are left out when the part lies wholly inside
+    them, so a moving range ("Last 7d") still finds the days it keeps.
+    """
+    if part.legacy:
+        if query.log_filter.query or not _writes_day_files(conn):
+            return None
+    elif not part.sealed:
+        return None
+    if part.min_ts is None or part.max_ts is None:
+        return None
+    log_filter = query.log_filter
+    from_us = iso_to_us(log_filter.from_ts) if log_filter.from_ts else None
+    to_us = iso_to_us(log_filter.to_ts) if log_filter.to_ts else None
+    within = dataclasses.replace(
+        log_filter,
+        from_ts=log_filter.from_ts if from_us is not None and from_us > part.min_ts else None,
+        to_ts=log_filter.to_ts if to_us is not None and to_us < part.max_ts else None,
+    )
+    return (
+        generation, part.day, part.legacy, part.row_count, part.min_id, part.max_id,
+        repr(within), tuple(query.docker_names), tuple(edges),
+    )
+
+
+def forget_histogram_counts() -> None:
+    """Drop every remembered chart count (tests)."""
+    with _histogram_cache_lock:
+        _HISTOGRAM_CACHE.clear()
 
 
 def _later_iso(bound: Optional[str], floor_s: int) -> str:

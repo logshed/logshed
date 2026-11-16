@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fetchLogHistogram, LogHistogram, LogHistogramBucket } from '../../api/logs.ts';
+import { ApiError } from '../../api/client.ts';
 import { LogFilterParams } from '../../types.ts';
 import { DAY_MS, buildTimeTicks, formatTimePoint, formatTimeTick } from '../../utils/timeAxis.ts';
 
@@ -131,6 +132,8 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   // clicked until the new counts arrive, so a click never zooms the new filters to an old bar
   const [dataKey, setDataKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The server stopped a count that took too long (504): its message, shown until the filters change
+  const [tooSlow, setTooSlow] = useState<string | null>(null);
   // The last pointer on the chart: a touch pins a bar's counts instead of zooming at once
   const pointerTypeRef = useRef<string>('mouse');
   // Where a touch went down, to tell a tap from a scroll
@@ -176,8 +179,17 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         setDataKey(key);
         bucketSeconds = result.bucket_seconds;
         setError(null);
+        setTooSlow(null);
       } catch (err) {
         if (cancelled || (err instanceof DOMException && err.name === 'AbortError')) return;
+        if (err instanceof ApiError && err.status === 504) {
+          // Too slow to count: say so and stop, rather than recount every refresh
+          setData(null);
+          setDataKey(null);
+          setError(null);
+          setTooSlow(err.message);
+          return;
+        }
         setError(err instanceof Error ? err.message : 'request failed');
         failed = true;
       }
@@ -349,6 +361,11 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
               ))}
             </BarChart>
           </ResponsiveContainer>
+        )}
+        {tooSlow && !data && (
+          <div role="status" className="absolute inset-0 flex items-center justify-center px-2 text-center text-[11px] font-mono text-fg-muted">
+            {tooSlow}
+          </div>
         )}
         {data && total === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-[11px] font-mono text-fg-muted pointer-events-none">

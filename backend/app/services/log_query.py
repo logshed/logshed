@@ -414,17 +414,28 @@ def run_newest_first(
     return run({**params, "fts_min_rowid": 0})
 
 
-async def run_search_query(fn: Callable[[sqlite3.Connection], T], request: Optional[Request] = None) -> T:
+async def run_search_query(
+    fn: Callable[[sqlite3.Connection], T],
+    request: Optional[Request] = None,
+    time_limit: Optional[float] = None,
+    limit_detail: Optional[str] = None,
+    what: str = "Search",
+) -> T:
     """
     Run a log search with run_db_query, stopping its SQLite statements when the client
-    disconnects (search as you type abandons each earlier request) or after
-    SEARCH_TIME_LIMIT_SECONDS. Raises HTTP 504 at the time limit and HTTP 499 on disconnect;
-    other database errors propagate unchanged.
+    disconnects (search as you type abandons each earlier request) or after time_limit seconds
+    (SEARCH_TIME_LIMIT_SECONDS unless given, read at each call). Raises HTTP 504 with limit_detail
+    (SEARCH_TIME_LIMIT_DETAIL unless given) at the time limit and HTTP 499 on disconnect; other
+    database errors propagate unchanged.
     """
+    if time_limit is None:
+        time_limit = SEARCH_TIME_LIMIT_SECONDS
+    if limit_detail is None:
+        limit_detail = SEARCH_TIME_LIMIT_DETAIL
     from app.api.deps import run_db_query
 
     disconnected = threading.Event()
-    deadline = time.monotonic() + SEARCH_TIME_LIMIT_SECONDS
+    deadline = time.monotonic() + time_limit
 
     def _should_interrupt() -> bool:
         return disconnected.is_set() or time.monotonic() > deadline
@@ -442,8 +453,8 @@ async def run_search_query(fn: Callable[[sqlite3.Connection], T], request: Optio
             raise
         if disconnected.is_set():
             raise HTTPException(status_code=499, detail="The client closed the request.")
-        logger.warning(f"Search stopped after {SEARCH_TIME_LIMIT_SECONDS:.0f} s")
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=SEARCH_TIME_LIMIT_DETAIL)
+        logger.warning(f"{what} stopped after {time_limit:.0f} s")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=limit_detail)
 
 
 async def _interrupt_on_disconnect(task: Awaitable[Any], request: Request, disconnected: threading.Event) -> None:

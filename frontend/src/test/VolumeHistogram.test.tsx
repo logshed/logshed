@@ -2,6 +2,7 @@ import type React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as logsApi from '../api/logs.ts';
+import { ApiError } from '../api/client.ts';
 import type { LogHistogram } from '../api/logs.ts';
 import { HISTOGRAM_DEBOUNCE_MS, HISTOGRAM_REFRESH_MS, refreshDelayMs, VolumeHistogram } from '../components/logs/VolumeHistogram.tsx';
 import { demoHistogram } from '../demo/server.ts';
@@ -223,6 +224,19 @@ describe('VolumeHistogram', () => {
     setVisibility('visible');
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('says when a count takes too long and stops fetching until the filters change', async () => {
+    fetchSpy.mockRejectedValueOnce(new ApiError(504, 'Too many logs to count quickly: pick a shorter time range.'));
+    const { rerender } = render(<VolumeHistogram filters={{ query: 'error' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(screen.getByRole('status')).toHaveTextContent('Too many logs to count quickly: pick a shorter time range.');
+    await act(() => vi.advanceTimersByTimeAsync(5 * HISTOGRAM_REFRESH_MS));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    rerender(<VolumeHistogram filters={{ query: 'error', from: '24h' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Too many logs/)).not.toBeInTheDocument();
   });
 
   it('tries a closed range again after a failure', async () => {

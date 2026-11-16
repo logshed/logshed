@@ -127,3 +127,12 @@ def free_syslog_port(monkeypatch) -> int:
         monkeypatch.setenv("SYSLOG_PORT", str(port))
         return port
     raise RuntimeError("no free port for both TCP and UDP")
+
+
+@pytest.fixture(autouse=True)
+def forget_histogram_counts():
+    """Start each test with no remembered volume chart counts: a fresh database looks the same as the last one."""
+    from app.services import log_store
+    log_store.forget_histogram_counts()
+    yield
+    log_store.forget_histogram_counts()

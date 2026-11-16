@@ -28,7 +28,7 @@ from app.models import (
 )
 from app.core.utils import AliasIndex, get_server_tzinfo, parse_multi_values
 from app.services.log_facets import get_facets
-from app.services.log_histogram import build_histogram
+from app.services.log_histogram import HISTOGRAM_TIME_LIMIT_DETAIL, HISTOGRAM_TIME_LIMIT_SECONDS, build_histogram
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 from app.services.log_export import check_export_ids, export_logs
 from app.services import log_store
@@ -128,7 +128,13 @@ async def log_histogram(
     tz = get_server_tzinfo()
 
     try:
-        result = await run_search_query(lambda conn: build_histogram(conn, log_filter, tz), request)
+        result = await run_search_query(
+            lambda conn: build_histogram(conn, log_filter, tz),
+            request,
+            time_limit=HISTOGRAM_TIME_LIMIT_SECONDS,
+            limit_detail=HISTOGRAM_TIME_LIMIT_DETAIL,
+            what="Volume chart count",
+        )
     except sqlite3.OperationalError as exc:
         raise db_busy_exception(exc, "counting logs for the histogram")
     return LogHistogramResponse(

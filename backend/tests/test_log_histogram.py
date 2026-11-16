@@ -289,6 +289,42 @@ class TestAllTime:
         assert (result.range_from, result.range_to) == (_s(D2, 1), _s(D2, 2))
 
 
+class TestRememberedCounts:
+    def test_a_sealed_day_s_counts_are_reused_until_logs_change(self, db):
+        _write(db, [_row(D1, 10), _row(D1, 10, 40, host="pve")])
+        _seal_d1(db)
+        edges = [_s(D1, 10), _s(D1, 10, 30), _s(D1, 11)]
+        assert _histogram(db, LogFilter(), edges) == [{6: 1}, {6: 1}]
+        with mock.patch.object(log_store, "_histogram_by_bar", side_effect=AssertionError("counted again")):
+            assert _histogram(db, LogFilter(), edges) == [{6: 1}, {6: 1}]
+        # A delete changes the logs: the day is counted again
+        with open_db(db) as conn:
+            log_store.delete(conn, LogFilter(sources=("pve",)), batch_size=100, between_batches=lambda: None)
+        assert _histogram(db, LogFilter(), edges) == [{6: 1}, {}]
+
+    def test_a_moving_range_reuses_the_days_it_holds_whole(self, db):
+        _write(db, [_row(D1, 10, 10), _row(D2, 1)])
+        _seal_d1(db)
+        edges = [_s(D1, 0), _s(D1, 12), _s(D2, 0), _s(D2, 12)]
+        # Two "last 2 days" ranges a minute apart: D1 lies wholly inside both
+        first = LogFilter(from_ts=_iso(_s(D1, 0) - 60))
+        second = LogFilter(from_ts=_iso(_s(D1, 0) - 30))
+        assert _histogram(db, first, edges) == [{6: 1}, {}, {6: 1}]
+        calls = []
+        real = log_store._histogram_by_bar
+        with mock.patch.object(log_store, "_histogram_by_bar", side_effect=lambda part, *a: calls.append(part.day) or real(part, *a)):
+            assert _histogram(db, second, edges) == [{6: 1}, {}, {6: 1}]
+        # Only the open day was counted again
+        assert calls == [D2]
+
+    def test_an_open_day_is_always_counted_again(self, db):
+        _write(db, [_row(D2, 1)])
+        edges = [_s(D2, 0), _s(D2, 12)]
+        assert _histogram(db, LogFilter(), edges) == [{6: 1}]
+        _write(db, [_row(D2, 2)])
+        assert _histogram(db, LogFilter(), edges) == [{6: 2}]
+
+
 class TestLongRanges:
     def test_a_year_typed_by_mistake_is_cut_to_the_stored_logs(self, db):
         # The Console applies each edit of From, so "0202" can be sent while a year is typed
@@ -355,6 +391,30 @@ class TestRoute:
             "error": 1, "warning": 0, "info": 0, "debug": 0,
         }
         assert sum(b["error"] + b["info"] for b in body["buckets"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_count_over_its_time_limit_stops_with_a_shorter_range_asked_for(self, client, headers, monkeypatch):
+        import sqlite3
+
+        import app.api.logs as logs_api
+
+        seen = {}
+
+        def slow(conn, log_filter, tz):
+            raise sqlite3.OperationalError("interrupted")
+
+        real_runner = logs_api.run_search_query
+
+        async def runner(fn, request=None, **kwargs):
+            seen.update(kwargs)
+            return await real_runner(fn, request, **kwargs)
+
+        monkeypatch.setattr(logs_api, "build_histogram", slow)
+        monkeypatch.setattr(logs_api, "run_search_query", runner)
+        resp = await client.get("/api/logs/histogram", headers=headers)
+        assert resp.status_code == 504
+        assert resp.json()["detail"] == "Too many logs to count quickly: pick a shorter time range."
+        assert seen["time_limit"] == 10.0
 
     @pytest.mark.asyncio
     async def test_an_unreadable_time_is_refused(self, client, headers):

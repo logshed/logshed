@@ -36,6 +36,12 @@ CATALOGUE_SPAN = 12 * HOUR
 
 SEVERITY_GROUPS = ("error", "warning", "info", "debug")
 
+# The chart is a side view: a count that takes longer than this stops (HTTP 504), and the chart
+# asks for a shorter range instead of holding a database thread while the list searches. Counts
+# of parts that cannot change are remembered (log_store.histogram), so a later count can finish.
+HISTOGRAM_TIME_LIMIT_SECONDS = 10.0
+HISTOGRAM_TIME_LIMIT_DETAIL = "Too many logs to count quickly: pick a shorter time range."
+
 
 def severity_group(severity: int) -> str:
     """The histogram's group for a syslog severity: emergency to error, warning, notice and info, debug."""
