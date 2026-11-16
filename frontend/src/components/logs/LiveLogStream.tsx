@@ -676,7 +676,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const resizableHeading = (col: ResizableColumn, heading: string, name: string) => {
     const { min, max } = columns.bounds(col);
     return (
-      <div className="relative self-stretch flex items-center min-w-0 pr-2">
+      <div className="relative self-stretch flex items-center min-w-0 pr-3">
         <span className="truncate">{heading}</span>
         <ColumnResizeHandle
           label={name}

@@ -16,7 +16,8 @@ interface ColumnResizeHandleProps {
 }
 
 /**
- * The drag handle on the right edge of a resizable Console heading: a focusable vertical separator
+ * The drag handle at the right edge of a resizable Console heading, inside it, so its line stands
+ * 6 px clear of the next column's heading text: a focusable vertical separator
  * (the WAI-ARIA window splitter pattern) whose value is the column's width in px. Drag it, or use
  * Left and Right (8 px a press), Home and End (narrowest and widest); Enter or a double-click resets it.
  */
@@ -87,7 +88,7 @@ export const ColumnResizeHandle: React.FC<ColumnResizeHandleProps> = ({ label, w
       onLostPointerCapture={endDrag}
       onDoubleClick={onReset}
       onKeyDown={handleKeyDown}
-      className="group/handle absolute -right-1.5 top-0 bottom-0 z-10 flex w-3 cursor-col-resize touch-none justify-center outline-hidden"
+      className="group/handle absolute right-0 top-0 bottom-0 z-10 flex w-3 cursor-col-resize touch-none justify-center outline-hidden"
     >
       <span className="w-px bg-line group-hover/handle:w-0.5 group-hover/handle:bg-accent-500 group-focus-visible/handle:w-0.5 group-focus-visible/handle:bg-accent-400" />
     </div>
