@@ -460,6 +460,33 @@ async def update_settings(
                 updates.append(("ai_api_key", "", 1))
             cleared_providers.append(p_name)
 
+        # The single ai_* values are what older versions read, and the fallback for the selected
+        # provider's own values. On a switch they follow the new provider, so a client that names only
+        # some of its fields (an import) never leaves the old provider's key or endpoint in use for
+        # it. The old provider first keeps them as its own when it has none (databases from before
+        # per-provider settings).
+        if req.ai_provider is not None and target_provider != normalize_provider_id(current_db_provider):
+            written = {key for key, _val, _enc in updates}
+            old_provider = normalize_provider_id(current_db_provider)
+            for name in ("ai_api_key", "ai_model", "ai_fallback_models", "ai_base_url"):
+                if name in written:
+                    continue
+                rows = {
+                    row[0]: (row[1], row[2])
+                    for row in cursor.execute(
+                        "SELECT key, value, is_encrypted FROM system_settings WHERE key IN (?, ?, ?)",
+                        (name, f"{name}_{old_provider}", f"{name}_{target_provider}"),
+                    ).fetchall()
+                }
+                legacy_val, legacy_enc = rows.get(name, ("", 0))
+                if legacy_val and not rows.get(f"{name}_{old_provider}", ("", 0))[0] and f"{name}_{old_provider}" not in written:
+                    updates.append((f"{name}_{old_provider}", legacy_val, legacy_enc))
+                new_val, new_enc = next(
+                    ((val, enc) for key, val, enc in reversed(updates) if key == f"{name}_{target_provider}"),
+                    rows.get(f"{name}_{target_provider}", ("", 1 if name == "ai_api_key" else 0)),
+                )
+                updates.append((name, new_val, new_enc))
+
         for key, val, is_enc in updates:
             cursor.execute(
                 """

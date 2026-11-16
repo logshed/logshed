@@ -1408,6 +1408,56 @@ class TestPartialProviderSave:
         assert TestUnknownProviderRefused._ai_rows(tmp_path)["ai_api_key_anthropic"] == ""
 
 
+class TestProviderSwitchKeepsKeysApart:
+    """The single stored AI values follow the selected provider, so a switch never reuses the old provider's key."""
+
+    @pytest.mark.asyncio
+    async def test_a_switch_without_a_key_does_not_send_the_old_providers_key(self, populated_db, auth_client, tmp_path):
+        from app.core.ai_providers import stored_provider_setting
+        from app.core.config import get_all_system_settings
+
+        res = await auth_client.post("/api/settings", json={"ai_provider": "gemini", "ai_api_key": "gemini-" + "old-key"})
+        assert res.status_code == 200
+        # A client that names only the new provider and its endpoint (as an import does)
+        res = await auth_client.post("/api/settings", json={
+            "ai_provider": "openai_compatible",
+            "ai_providers_config": {"openai_compatible": {"ai_base_url": "https://llm.example.com/v1"}},
+        })
+        assert res.status_code == 200
+        conn = sqlite3.connect(str(tmp_path / "logs.db"))
+        conn.row_factory = sqlite3.Row
+        stored = get_all_system_settings(conn)
+        conn.close()
+        assert stored_provider_setting(stored, "openai_compatible", "ai_api_key") == ""
+        assert stored_provider_setting(stored, "openai_compatible", "ai_base_url") == "https://llm.example.com/v1"
+        # The old provider keeps its own key
+        assert stored_provider_setting(stored, "gemini", "ai_api_key", "openai_compatible") == "gemini-old-key"
+
+    @pytest.mark.asyncio
+    async def test_a_key_stored_only_in_the_single_value_stays_with_its_provider(self, populated_db, auth_client, tmp_path):
+        from app.core.ai_providers import stored_provider_setting
+        from app.core.config import get_all_system_settings, invalidate_settings_cache
+
+        # As saved by versions before per-provider settings
+        conn = sqlite3.connect(str(tmp_path / "logs.db"))
+        conn.execute("DELETE FROM system_settings WHERE key LIKE 'ai_%'")
+        conn.executemany(
+            "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, '', ?)",
+            [("ai_provider", "gemini", 0), ("ai_api_key", encrypt_value("gemini-" + "legacy-key"), 1)],
+        )
+        conn.commit()
+        conn.close()
+        invalidate_settings_cache()
+        res = await auth_client.post("/api/settings", json={"ai_provider": "openai"})
+        assert res.status_code == 200
+        conn = sqlite3.connect(str(tmp_path / "logs.db"))
+        conn.row_factory = sqlite3.Row
+        stored = get_all_system_settings(conn)
+        conn.close()
+        assert stored_provider_setting(stored, "gemini", "ai_api_key", "openai") == "gemini-legacy-key"
+        assert stored_provider_setting(stored, "openai", "ai_api_key") == ""
+
+
 class TestDefaultModelFallback:
 
     def test_settings_response_default_model(self):

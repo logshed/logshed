@@ -35,6 +35,7 @@ from app.api import (
     aliases,
     auth,
     backups,
+    config_transfer,
     docker_hosts,
     drop_rules,
     external_v1,
@@ -1256,6 +1257,7 @@ def create_app() -> FastAPI:
     api_router.include_router(ai.router)
     api_router.include_router(tokens.router)
     api_router.include_router(docker_hosts.router)
+    api_router.include_router(config_transfer.router)
 
     app.include_router(api_router)
 

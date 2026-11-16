@@ -532,6 +532,9 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
   ['GET', /^\/api\/system\/backups\/current$/, () => ({ state: 'idle', done: 0, total: 0 })],
   ['POST', /^\/api\/system\/backups$/, () => { throw notInDemo('Database backups'); }],
   ['DELETE', /^\/api\/system\/backups\/.+$/, () => { throw notInDemo('Database backups'); }],
+  ['POST', /^\/api\/config\/export$/, () => { throw notInDemo('Configuration export'); }],
+  ['POST', /^\/api\/config\/import\/preview$/, () => { throw notInDemo('Configuration import'); }],
+  ['POST', /^\/api\/config\/import$/, () => { throw notInDemo('Configuration import'); }],
   ['GET', /^\/api\/system\/recovery$/, () => ({ status: 'ready', backup_available: false })],
 ];
 

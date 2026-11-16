@@ -909,9 +909,11 @@ class TestSettingsEncryptionAndKeyManagement:
 
         with open_db(db_file) as conn:
             cursor = conn.cursor()
+            # The masked key keeps OpenAI's key as OpenAI's; the switch does not hand it to Gemini
+            cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_api_key_openai'")
+            assert decrypt_value(cursor.fetchone()[0]) == "sk-1234567890abcdef1234567890"
             cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_api_key'")
-            val = cursor.fetchone()[0]
-            assert decrypt_value(val) == "sk-1234567890abcdef1234567890"
+            assert cursor.fetchone()[0] == ""
 
         # By default, MAX_RETENTION_DAYS is 30
         res_valid = await client.post("/api/settings", json={"retention_days": 30})

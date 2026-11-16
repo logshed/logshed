@@ -29,6 +29,7 @@ import { AiProviderCard } from './AiProviderCard.tsx';
 import { StickySaveBar } from './StickySaveBar.tsx';
 import { AboutCard } from './AboutCard.tsx';
 import { ChangePasswordCard } from './ChangePasswordCard.tsx';
+import { ConfigTransferCard } from './ConfigTransferCard.tsx';
 import { useSavedForm } from './useSavedForm.ts';
 
 
@@ -590,6 +591,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             onDirtyChange={handleSubTabDirtyChange}
             saveTriggerRef={subTabSaveRef}
           />
+
+          {/* The whole configuration to a file and back */}
+          <ConfigTransferCard serverTimezone={serverTimezone} onImported={refreshBaseline} />
 
           {/* Admin Password Reset Section */}
           <ChangePasswordCard />
