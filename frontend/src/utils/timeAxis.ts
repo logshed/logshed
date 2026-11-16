@@ -10,8 +10,9 @@ export const DAY_MS = 24 * HOUR_MS;
 // Tick spacing candidates; the smallest that keeps the tick count within maxTicks wins. Every
 // step under a day divides a day evenly, so ticks line up with the zone's midnight.
 const TICK_STEPS_MS = [
-  1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080,
-].map((minutes) => minutes * MINUTE_MS);
+  ...[1, 2, 5, 10, 15, 30].map((seconds) => seconds * 1000),
+  ...[1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080].map((minutes) => minutes * MINUTE_MS),
+];
 
 export interface TimeTicks {
   ticks: number[];
@@ -59,19 +60,21 @@ export function buildTimeTicks(
 const pad2 = (n: number | string) => String(n).padStart(2, '0');
 
 /**
- * Axis label on the zone's clock: 'M/D' for day steps, 'M/D HH:00' for hour steps and 'HH:mm'
- * below an hour. withDate: false leaves the date off hour steps too, for ranges inside a day.
+ * Axis label on the zone's clock: 'M/D' for day steps, 'M/D HH:00' for hour steps, 'HH:mm' below
+ * an hour and 'HH:mm:ss' below a minute. withDate: false leaves the date off hour steps too, for
+ * ranges inside a day.
  */
 export function formatTimeTick(ms: number, stepMs: number, timeZone?: string, withDate = true): string {
   const p = getDateParts(new Date(ms), axisTimeZone(timeZone));
   const day = `${p.month}/${p.day}`;
   if (stepMs >= DAY_MS) return day;
   if (stepMs >= HOUR_MS) return withDate ? `${day} ${p.hours}:00` : `${p.hours}:00`;
-  return `${p.hours}:${pad2(p.minutes)}`;
+  if (stepMs >= MINUTE_MS) return `${p.hours}:${pad2(p.minutes)}`;
+  return `${p.hours}:${pad2(p.minutes)}:${pad2(p.seconds)}`;
 }
 
-/** A point in time for a chart tooltip: 'M/D HH:mm' on the zone's clock. */
-export function formatTimePoint(ms: number, timeZone?: string): string {
+/** A point in time for a chart tooltip: 'M/D HH:mm' on the zone's clock, with ':ss' when withSeconds. */
+export function formatTimePoint(ms: number, timeZone?: string, withSeconds = false): string {
   const p = getDateParts(new Date(ms), axisTimeZone(timeZone));
-  return `${p.month}/${p.day} ${p.hours}:${p.minutes}`;
+  return `${p.month}/${p.day} ${p.hours}:${p.minutes}${withSeconds ? `:${p.seconds}` : ''}`;
 }

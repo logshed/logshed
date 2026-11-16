@@ -68,13 +68,18 @@ describe('Console volume histogram', () => {
 
     await waitFor(() =>
       expect(fetchLogs).toHaveBeenCalledWith(
-        expect.objectContaining({ from: '2026-03-28T11:00:00.000Z', to: '2026-03-28T11:30:00.000Z' }),
+        expect.objectContaining({ from: '2026-03-28T11:00:00.000Z', to: '2026-03-28T11:29:59.999Z' }),
         expect.anything(),
       ),
     );
     const zoomed = new URLSearchParams(window.location.search);
     expect(zoomed.get('time')).toBe('2026-03-28T11:00:00.000Z');
-    expect(zoomed.get('to')).toBe('2026-03-28T11:30:00.000Z');
+    expect(zoomed.get('to')).toBe('2026-03-28T11:29:59.999Z');
+
+    // A second click on the bar now shown adds no history entry, so one Back still returns
+    const entries = window.history.length;
+    fireEvent.click(container.querySelector('.recharts-bar-rectangle')!);
+    expect(window.history.length).toBe(entries);
 
     fetchLogs.mockClear();
     await act(async () => {

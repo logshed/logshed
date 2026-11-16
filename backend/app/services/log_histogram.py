@@ -7,6 +7,7 @@ day's counts come from the catalogue instead of its file (log_store.histogram).
 """
 
 import datetime
+import math
 import sqlite3
 from dataclasses import dataclass
 from typing import Optional
@@ -24,9 +25,12 @@ MAX_BUCKETS = 60
 BUCKET_SECONDS = (
     1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800,
     3600, 7200, 10800, 21600, 43200, 86400, 2 * 86400, 7 * 86400,
+    14 * 86400, 30 * 86400, 91 * 86400, 365 * 86400,
 )
 HOUR = 3600
 DAY = 86400
+# Ranges longer than this are cut to the stored logs' times (clamp_to_stored)
+CLAMP_SPAN = 366 * 86400
 # Above this span, buckets are whole hours or more, which the catalogue can count
 CATALOGUE_SPAN = 12 * HOUR
 
@@ -109,9 +113,35 @@ def histogram_range(log_filter: LogFilter, now: datetime.datetime) -> tuple[int,
     The time range (UTC epoch seconds) the histogram shows for a filter: its From and To, with
     now for a missing To, and the hour before the end for a missing From.
     """
-    end = _epoch(log_filter.to_ts) if log_filter.to_ts else int(now.timestamp())
+    # Rounded up: a To inside a second (a zoomed bar ends a millisecond before the next) keeps
+    # that second's bucket whole
+    end = math.ceil(_epoch_exact(log_filter.to_ts)) if log_filter.to_ts else int(now.timestamp())
     start = _epoch(log_filter.from_ts) if log_filter.from_ts else end - int(DEFAULT_WINDOW.total_seconds())
     return start, max(end, start + 1)
+
+
+def clamp_to_stored(conn: sqlite3.Connection, range_from: int, range_to: int, now_s: int) -> tuple[int, int]:
+    """
+    A range over a year cut to the stored logs' own times (the oldest log's, and the later of now
+    and the newest log's), so a year typed by mistake into From or To (the Console applies each
+    edit) does not ask for thousands of buckets; nothing outside that span is stored. Shorter
+    ranges are kept as they are; a long range with no stored log, or still over a year, keeps
+    its last year.
+    """
+    if range_to - range_from <= CLAMP_SPAN:
+        return range_from, range_to
+    oldest_us, newest_us = log_store.stored_time_span(conn)
+    if oldest_us is not None and newest_us is not None:
+        oldest, latest = oldest_us // 1_000_000, max(now_s, -(-newest_us // 1_000_000))
+        start, end = max(range_from, oldest), min(range_to, latest)
+        if end - start > 0 and end - start <= CLAMP_SPAN:
+            return start, end
+    # No stored log in the range (or more than a year of them): its last year
+    return max(range_from, range_to - CLAMP_SPAN), range_to
+
+
+def _epoch_exact(stored_iso: str) -> float:
+    return datetime.datetime.fromisoformat(stored_iso).timestamp()
 
 
 def _epoch(stored_iso: str) -> int:
@@ -126,7 +156,7 @@ def build_histogram(
 ) -> Histogram:
     """Counts by severity group in each bucket of the filter's range (see the module docstring)."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
-    range_from, range_to = histogram_range(log_filter, now)
+    range_from, range_to = clamp_to_stored(conn, *histogram_range(log_filter, now), int(now.timestamp()))
     size = choose_bucket(range_to - range_from)
     edges = bucket_edges(range_from, range_to, size, tz)
     # The range's own bounds (the hour before now for All Time) apply as well as the buckets'
@@ -147,7 +177,11 @@ def build_histogram(
         buckets.append(
             Bucket(start=max(edges[i], range_from), end=min(edges[i + 1], range_to), counts=grouped)
         )
-    # Edges come from range_from's bucket to the one holding range_to; drop an empty last one
+    # Edges come from range_from's bucket to the one holding range_to. When range_to is an edge,
+    # the last bucket has no width: the logs stamped exactly at range_to (the filter's end is
+    # inclusive) go into the bucket before it
     while len(buckets) > 1 and buckets[-1].start >= buckets[-1].end:
-        buckets.pop()
+        empty = buckets.pop()
+        for group, cnt in empty.counts.items():
+            buckets[-1].counts[group] += cnt
     return Histogram(range_from=range_from, range_to=range_to, bucket_seconds=size, buckets=buckets)

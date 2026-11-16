@@ -1151,6 +1151,14 @@ def count_matching(conn: sqlite3.Connection, log_filter: LogFilter) -> int:
     return count(conn, log_filter)[0]
 
 
+def stored_time_span(conn: sqlite3.Connection) -> tuple[Optional[int], Optional[int]]:
+    """The oldest and newest stored log's own time (UTC microseconds), from the catalogue; None when empty."""
+    found = [p for p in day_store.parts(conn) if p.min_ts is not None and p.max_ts is not None]
+    if not found:
+        return None, None
+    return min(p.min_ts for p in found), max(p.max_ts for p in found)
+
+
 def histogram(conn: sqlite3.Connection, log_filter: LogFilter, edges: list[int]) -> list[dict[int, int]]:
     """
     How many logs log_filter selects in each bucket [edges[i], edges[i + 1]) (UTC epoch seconds,
@@ -1185,8 +1193,10 @@ def histogram(conn: sqlite3.Connection, log_filter: LogFilter, edges: list[int])
     for part in found:
         if use_catalogue and part.sealed and _catalogue_hosts_exact(conn, part, query.log_filter.sources):
             _histogram_from_catalogue(conn, part, query, add)
-        else:
+        elif bounded.query:
             _histogram_part(part, query, step, add)
+        else:
+            _histogram_by_bar(part, query, edges, add)
     return buckets
 
 
@@ -1204,6 +1214,35 @@ def _earlier_iso(bound: Optional[str], ceiling_s: int) -> str:
     if bound is None:
         return ceiling_iso
     return bound if iso_to_us(bound) < ceiling_s * 1_000_000 else ceiling_iso
+
+
+def _histogram_by_bar(
+    part: day_store.Part, query: _PartQuery, edges: list[int], add: Callable[[int, int, int], None]
+) -> None:
+    """
+    histogram() for one part without search words: one count per bucket, each a range of the time
+    index summed by severity. About twice as fast as grouping by time step (which sorts every row,
+    and can spill the sort to disk on a busy day) on an open day file: 56 against 125 ms for
+    257,500 rows. With search words the full-text match would run once per bucket, so
+    _histogram_part groups instead.
+    """
+    log_filter = query.log_filter
+    from_us = iso_to_us(log_filter.from_ts) if log_filter.from_ts else None
+    to_us = iso_to_us(log_filter.to_ts) if log_filter.to_ts else None
+    sums = ", ".join(f"SUM(logs.severity = {severity})" for severity in range(8))
+    cursor = part.conn.cursor()
+    for start_s, end_s in zip(edges, edges[1:]):
+        # The bucket [start, end) as inclusive microsecond bounds, inside the filter's own bounds
+        start_us = start_s * 1_000_000 if from_us is None else max(start_s * 1_000_000, from_us)
+        end_us = end_s * 1_000_000 - 1 if to_us is None else min(end_s * 1_000_000 - 1, to_us)
+        if end_us < start_us or not part.overlaps(start_us, end_us):
+            continue
+        bar = dataclasses.replace(log_filter, from_ts=us_to_iso(start_us), to_ts=us_to_iso(end_us))
+        where_sql, params = _PartQuery(bar, query.docker_names).where(part)
+        row = cursor.execute(f"SELECT {sums} FROM logs {where_sql}", params).fetchone()
+        for severity, cnt in enumerate(row):
+            if cnt:
+                add(start_s, severity, cnt)
 
 
 def _histogram_part(

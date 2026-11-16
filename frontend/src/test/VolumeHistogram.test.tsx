@@ -92,7 +92,54 @@ describe('VolumeHistogram', () => {
     const rect = container.querySelector('.recharts-bar-rectangle path, .recharts-bar-rectangle');
     expect(rect).not.toBeNull();
     fireEvent.click(rect!);
-    expect(onZoom).toHaveBeenCalledWith('2026-03-28T11:00:00.000Z', '2026-03-28T11:30:00.000Z');
+    // The Console's To includes its own moment: the zoom ends a millisecond before the next bar
+    expect(onZoom).toHaveBeenCalledWith('2026-03-28T11:00:00.000Z', '2026-03-28T11:29:59.999Z');
+  });
+
+  it('on a touch screen zooms on the second tap of a bar, after showing it', async () => {
+    const onZoom = vi.fn();
+    const { container } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={onZoom} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    const chart = screen.getByRole('img');
+    for (let tap = 0; tap < 2; tap++) {
+      // The first tap redraws the chart (its tooltip): find the bar again each time
+      fireEvent.pointerDown(chart, { pointerType: 'touch' });
+      fireEvent.click(container.querySelector('.recharts-bar-rectangle path, .recharts-bar-rectangle')!);
+      expect(onZoom).toHaveBeenCalledTimes(tap);
+    }
+  });
+
+  it('dims the old bars and ignores clicks while new filters load', async () => {
+    const onZoom = vi.fn();
+    const { container, rerender } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={onZoom} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    rerender(<VolumeHistogram filters={{ query: 'disk' }} timeZone="UTC" isMobile={false} onZoom={onZoom} />);
+    expect(screen.getByRole('img')).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(container.querySelector('.recharts-bar-rectangle path, .recharts-bar-rectangle')!);
+    expect(onZoom).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(screen.getByRole('img')).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('shows seconds for bars under a minute', async () => {
+    fetchSpy.mockResolvedValue({
+      range_from: '2026-03-28T11:00:00+00:00',
+      range_to: '2026-03-28T11:00:30+00:00',
+      bucket_seconds: 15,
+      buckets: [
+        bucket('2026-03-28T11:00:00+00:00', '2026-03-28T11:00:15+00:00', { info: 3 }),
+        bucket('2026-03-28T11:00:15+00:00', '2026-03-28T11:00:30+00:00', { info: 1 }),
+      ],
+    });
+    render(<VolumeHistogram filters={{ from: '15m' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(screen.getByRole('img').getAttribute('aria-label')).toContain('most between 3/28 11:00:00 - 11:00:15 (3)');
+  });
+
+  it('names the hour before To when only To is set', async () => {
+    render(<VolumeHistogram filters={{ to: HOUR.range_to }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(screen.getByText('Log volume, the hour before To')).toBeInTheDocument();
   });
 
   it('fetches again every few seconds while the Console follows new logs', async () => {
@@ -120,6 +167,16 @@ describe('VolumeHistogram', () => {
     setVisibility('visible');
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('tries a closed range again after a failure', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('Database is busy'));
+    render(
+      <VolumeHistogram filters={{ from: HOUR.range_from, to: HOUR.range_to }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS + 3 * HISTOGRAM_REFRESH_MS));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('shows a failed fetch and tries again at the next refresh', async () => {

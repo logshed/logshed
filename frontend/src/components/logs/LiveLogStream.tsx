@@ -298,6 +298,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // replace the current one), so Back returns to the range before the zoom
   const zoomToRange = useCallback(
     (from: string, to: string) => {
+      // Already showing that range (a second click on a bar of the zoomed chart): no history entry
+      if (filters.from === from && filters.to === to) return;
       try {
         window.history.pushState(null, '', window.location.pathname + window.location.search);
       } catch {

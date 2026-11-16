@@ -85,7 +85,10 @@ class TestBuckets:
             (24 * 3600, 3600),
             (7 * 86400, 3 * 3600),
             (30 * 86400, 12 * 3600),
-            (400 * 86400, 7 * 86400),
+            (300 * 86400, 7 * 86400),
+            (366 * 86400, 7 * 86400),
+            (5 * 365 * 86400, 91 * 86400),
+            (20 * 365 * 86400, 365 * 86400),
         ],
     )
     def test_about_sixty_buckets_at_most(self, span, size):
@@ -249,12 +252,44 @@ class TestBuild:
         assert by_start[_s(D2, 12, 10)]["warning"] == 1
         assert sum(sum(b.counts.values()) for b in result.buckets) == 3
 
-    def test_a_range_ending_on_an_edge_has_no_empty_last_bucket(self, db):
+    def test_a_range_ending_on_an_edge_counts_its_last_moment_in_the_last_bucket(self, db):
+        # The filter's end is inclusive, as the Console's list reads it: a log stamped at 11:00 is in it
+        _write(db, [_row(D2, 10, 59), _row(D2, 11)])
         log_filter = LogFilter(from_ts=_iso(_s(D2, 10)), to_ts=_iso(_s(D2, 11)))
         with open_db(db) as conn:
             result = log_histogram.build_histogram(conn, log_filter, _UTC)
         assert len(result.buckets) == 60
         assert result.buckets[-1].end == _s(D2, 11)
+        assert result.buckets[-1].counts["info"] == 2
+
+
+class TestLongRanges:
+    def test_a_year_typed_by_mistake_is_cut_to_the_stored_logs(self, db):
+        # The Console applies each edit of From, so "0202" can be sent while a year is typed
+        _write(db, [_row(D1, 10), _row(D2, 1)])
+        now = datetime.datetime.fromtimestamp(_s(D2, 2), _UTC)
+        log_filter = LogFilter(from_ts="0202-03-27T10:00:00+00:00")
+        with open_db(db) as conn:
+            result = log_histogram.build_histogram(conn, log_filter, _UTC, now=now)
+        assert result.range_from == _s(D1, 10)
+        assert result.range_to == _s(D2, 2)
+        assert len(result.buckets) <= 60
+        assert sum(sum(b.counts.values()) for b in result.buckets) == 2
+
+    def test_a_long_range_with_no_stored_log_keeps_its_last_year(self, db):
+        log_filter = LogFilter(from_ts="0202-01-01T00:00:00+00:00", to_ts="0900-01-01T00:00:00+00:00")
+        with open_db(db) as conn:
+            result = log_histogram.build_histogram(conn, log_filter, _UTC)
+        assert result.range_to - result.range_from == log_histogram.CLAMP_SPAN
+        assert len(result.buckets) <= 60
+
+    def test_a_year_or_less_is_kept_whatever_is_stored(self, db):
+        _write(db, [_row(D2, 1)])
+        now = datetime.datetime.fromtimestamp(_s(D2, 2), _UTC)
+        log_filter = LogFilter(from_ts=_iso(_s(D2, 2) - 7 * 86400))
+        with open_db(db) as conn:
+            result = log_histogram.build_histogram(conn, log_filter, _UTC, now=now)
+        assert result.range_from == _s(D2, 2) - 7 * 86400
 
 
 @pytest_asyncio.fixture

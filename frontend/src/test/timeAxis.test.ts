@@ -60,6 +60,12 @@ describe('buildTimeTicks on the server clock', () => {
     ]);
   });
 
+  it('steps in seconds for ranges under a few minutes and labels them HH:mm:ss', () => {
+    expect(labels(at(NEW_YORK, 10, 20, 16, 0), at(NEW_YORK, 10, 20, 16, 1), NEW_YORK)).toEqual([
+      '16:00:00', '16:00:10', '16:00:20', '16:00:30', '16:00:40', '16:00:50', '16:01:00',
+    ]);
+  });
+
   it('leaves the date off hour labels when asked', () => {
     expect(formatTimeTick(at(NEW_YORK, 10, 20, 18), HOUR_MS, NEW_YORK, false)).toBe('18:00');
   });

@@ -38,26 +38,41 @@ interface VolumeHistogramProps {
   onZoom: (from: string, to: string) => void;
 }
 
-const toBar = (b: LogHistogramBucket): VolumeBar => {
+/**
+ * A bucket as a bar. Bars stand at their bucket's middle, and the first and last bucket (cut to
+ * the range) at the middle of a whole one, so every bar is spaced, and so drawn, the same width.
+ */
+const toBar = (b: LogHistogramBucket, i: number, all: LogHistogramBucket[], bucketMs: number): VolumeBar => {
   const start = Date.parse(b.start);
   const end = Date.parse(b.end);
-  return { mid: (start + end) / 2, start, end, total: b.error + b.warning + b.info + b.debug, error: b.error, warning: b.warning, info: b.info, debug: b.debug };
+  let mid = (start + end) / 2;
+  if (i === 0 && all.length > 1) mid = end - bucketMs / 2;
+  else if (i === all.length - 1 && all.length > 1) mid = start + bucketMs / 2;
+  return { mid, start, end, total: b.error + b.warning + b.info + b.debug, error: b.error, warning: b.warning, info: b.info, debug: b.debug };
 };
 
-/** A bar's span for its tooltip: '3/14 09:05 - 09:06', with the end's date only when it differs. */
-function spanLabel(bar: VolumeBar, timeZone?: string): string {
-  const from = formatTimePoint(bar.start, timeZone);
-  const to = formatTimePoint(bar.end, timeZone);
+/**
+ * A bar's span for its tooltip: '3/14 09:05 - 09:06', with the end's date only when it differs,
+ * and seconds for bars under a minute.
+ */
+function spanLabel(bar: VolumeBar, timeZone?: string, withSeconds = false): string {
+  const from = formatTimePoint(bar.start, timeZone, withSeconds);
+  const to = formatTimePoint(bar.end, timeZone, withSeconds);
   const [fromDay] = from.split(' ');
   const [toDay, toTime] = to.split(' ');
   return `${from} - ${fromDay === toDay ? toTime : to}`;
 }
 
 /** A bar's tooltip: its span and total, then each severity group with logs, worst first. */
-const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string }> = ({ bar, timeZone }) => (
+const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string; withSeconds: boolean; tapHint: boolean }> = ({
+  bar,
+  timeZone,
+  withSeconds,
+  tapHint,
+}) => (
   <div className="rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 font-mono text-[11px] text-fg shadow-lg">
     <div className="text-fg-strong">
-      {spanLabel(bar, timeZone)}: {bar.total.toLocaleString()}
+      {spanLabel(bar, timeZone, withSeconds)}: {bar.total.toLocaleString()}
     </div>
     {GROUPS.filter((g) => bar[g.key] > 0).map((g) => (
       <div key={g.key} className="flex items-center gap-1.5 text-fg-soft">
@@ -65,6 +80,7 @@ const BarTooltip: React.FC<{ bar: VolumeBar; timeZone?: string }> = ({ bar, time
         {g.label}: {bar[g.key].toLocaleString()}
       </div>
     ))}
+    {tapHint && <div className="text-fg-muted">Tap again to zoom in</div>}
   </div>
 );
 
@@ -80,7 +96,16 @@ const filterKey = (f: LogFilterParams) =>
  */
 export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZone, isMobile, onZoom }) => {
   const [data, setData] = useState<LogHistogram | null>(null);
+  // The filters the shown counts are for: bars of earlier filters are dimmed and cannot be
+  // clicked until the new counts arrive, so a click never zooms the new filters to an old bar
+  const [dataKey, setDataKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // On a touch screen the first tap on a bar shows its tooltip and the second zooms
+  const pointerTypeRef = useRef<string>('mouse');
+  // Read from a ref: Recharts may keep a bar's first click handler across renders
+  const armedRef = useRef<number | null>(null);
+  const [armedStart, setArmedStart] = useState<number | null>(null);
+  const staleRef = useRef(false);
   const key = filterKey(filters);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
@@ -107,16 +132,20 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
       skipped = false;
       controller?.abort();
       controller = new AbortController();
+      let failed = false;
       try {
         const result = await fetchLogHistogram(filtersRef.current, { signal: controller.signal });
         if (cancelled) return;
         setData(result);
+        setDataKey(key);
         setError(null);
       } catch (err) {
         if (cancelled || (err instanceof DOMException && err.name === 'AbortError')) return;
         setError(err instanceof Error ? err.message : 'request failed');
+        failed = true;
       }
-      if (!cancelled && live) schedule(HISTOGRAM_REFRESH_MS);
+      // A closed range is fetched once, but tried again after a failure
+      if (!cancelled && (live || failed)) schedule(HISTOGRAM_REFRESH_MS);
     };
     // Back on the tab: fetch at once if a fetch was skipped while it was hidden
     const onVisible = () => {
@@ -133,7 +162,11 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
     };
   }, [key, live]);
 
-  const bars = useMemo(() => (data ? data.buckets.map(toBar) : []), [data]);
+  const bucketMs = data ? data.bucket_seconds * 1000 : 0;
+  const bars = useMemo(() => (data ? data.buckets.map((b, i, all) => toBar(b, i, all, bucketMs)) : []), [data, bucketMs]);
+  const stale = data !== null && dataKey !== key;
+  staleRef.current = stale;
+  const withSeconds = data !== null && data.bucket_seconds < 60;
   const total = bars.reduce((sum, b) => sum + b.total, 0);
   const rangeFrom = data ? Date.parse(data.range_from) : 0;
   const rangeTo = data ? Date.parse(data.range_to) : 0;
@@ -142,12 +175,13 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
     [rangeFrom, rangeTo, timeZone, isMobile],
   );
   const spansDays = rangeTo - rangeFrom > DAY_MS;
-  const halfBucket = data ? (data.bucket_seconds * 1000) / 2 : 0;
-  const caption = !filters.from && !filters.to ? 'Log volume, last hour' : 'Log volume';
+  const domain = bars.length > 0 ? [bars[0].mid - bucketMs / 2, bars[bars.length - 1].mid + bucketMs / 2] : [0, 1];
+  let caption = 'Log volume';
+  if (!filters.from) caption = filters.to ? 'Log volume, the hour before To' : 'Log volume, last hour';
   const busiest = bars.reduce<VolumeBar | null>((top, b) => (!top || b.total > top.total ? b : top), null);
   const summary = data
-    ? `${caption}: ${total.toLocaleString()} logs from ${formatTimePoint(rangeFrom, timeZone)} to ${formatTimePoint(rangeTo, timeZone)}` +
-      (busiest && busiest.total > 0 ? `, most between ${spanLabel(busiest, timeZone)} (${busiest.total.toLocaleString()})` : '')
+    ? `${caption}: ${total.toLocaleString()} logs from ${formatTimePoint(rangeFrom, timeZone, withSeconds)} to ${formatTimePoint(rangeTo, timeZone, withSeconds)}` +
+      (busiest && busiest.total > 0 ? `, most between ${spanLabel(busiest, timeZone, withSeconds)} (${busiest.total.toLocaleString()})` : '')
     : `${caption}: loading`;
 
   return (
@@ -164,7 +198,17 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
           !isMobile && <span>Click a bar to zoom in</span>
         )}
       </div>
-      <div className={`relative ${isMobile ? 'h-14' : 'h-20'}`} role="img" aria-label={summary}>
+      <div
+        className={`relative ${isMobile ? 'h-14' : 'h-20'} ${stale ? 'opacity-50 pointer-events-none' : ''}`}
+        role="img"
+        aria-label={summary}
+        aria-busy={stale}
+        // A swipe down on the chart is for its bars, not the Console's pull-to-refresh
+        data-no-pull-refresh
+        onPointerDown={(e) => {
+          pointerTypeRef.current = e.pointerType;
+        }}
+      >
         {data && (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={bars} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap={1}>
@@ -172,7 +216,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                 dataKey="mid"
                 type="number"
                 scale="time"
-                domain={[rangeFrom - halfBucket, rangeTo + halfBucket]}
+                domain={domain}
                 ticks={ticks}
                 tickFormatter={(ms: number) => formatTimeTick(ms, stepMs, timeZone, spansDays)}
                 stroke="var(--color-fg-subtle)"
@@ -186,7 +230,9 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                 wrapperStyle={{ zIndex: 30 }}
                 content={({ active, payload }) => {
                   const bar = active ? (payload?.[0]?.payload as VolumeBar | undefined) : undefined;
-                  return bar ? <BarTooltip bar={bar} timeZone={timeZone} /> : null;
+                  return bar ? (
+                    <BarTooltip bar={bar} timeZone={timeZone} withSeconds={withSeconds} tapHint={armedStart === bar.start} />
+                  ) : null;
                 }}
               />
               {GROUPS.map((g) => (
@@ -199,7 +245,17 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                   cursor="pointer"
                   onClick={(entry: { payload?: VolumeBar }) => {
                     const bar = entry?.payload;
-                    if (bar) onZoom(new Date(bar.start).toISOString(), new Date(bar.end).toISOString());
+                    if (!bar || staleRef.current) return;
+                    if (pointerTypeRef.current === 'touch' && armedRef.current !== bar.start) {
+                      armedRef.current = bar.start;
+                      setArmedStart(bar.start);
+                      return;
+                    }
+                    armedRef.current = null;
+                    setArmedStart(null);
+                    // The Console's To includes its own moment, which is the next bar's start:
+                    // end a millisecond before it so the list holds only this bar's logs
+                    onZoom(new Date(bar.start).toISOString(), new Date(bar.end - 1).toISOString());
                   }}
                 />
               ))}
