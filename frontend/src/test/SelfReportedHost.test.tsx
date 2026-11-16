@@ -86,6 +86,8 @@ describe('Self-reported host names', () => {
         onToggleAutoScroll={vi.fn()}
         onClearBuffer={vi.fn()}
         onDownload={vi.fn()}
+        histogramShown={false}
+        onToggleHistogram={vi.fn()}
       />
     );
     const [plain, reported] = screen.getAllByTestId('quick-filter-host');

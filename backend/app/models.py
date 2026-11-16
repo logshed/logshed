@@ -79,6 +79,24 @@ class LogListResponse(BaseModel):
     total_capped: bool = False
 
 
+class LogHistogramBucket(BaseModel):
+    """One bar of the Console's volume histogram: its span and the logs in it by severity group."""
+    start: str
+    end: str
+    error: int
+    warning: int
+    info: int
+    debug: int
+
+
+class LogHistogramResponse(BaseModel):
+    """Log counts per time bucket over the Console's range (the last hour when it has no start)."""
+    range_from: str
+    range_to: str
+    bucket_seconds: int
+    buckets: list[LogHistogramBucket]
+
+
 class ExternalLogListResponse(BaseModel):
     """Keyset-paginated logs response for the external API."""
     logs: list[LogEntry]

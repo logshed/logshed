@@ -13,15 +13,18 @@ Helpers the store builds on: ``log_query`` turns a ``LogFilter`` into SQL and ru
 searches newest first, and ``fts_indexer`` keeps the full-text index up to date.
 """
 
+import bisect
 import contextlib
+import dataclasses
 import datetime
 import ipaddress
+import math
 import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional
 
-from app.core.day_files import LEGACY_DAY, RAW_SQL, day_start_us, iso_sql, iso_to_us
+from app.core.day_files import LEGACY_DAY, RAW_SQL, day_start_us, iso_sql, iso_to_us, us_to_iso
 from app.core.utils import (
     DOCKER_ALIASES_SQL,
     FORMER_DOCKER_ALIASES_KEY,
@@ -1146,6 +1149,155 @@ def _legacy_count(
 def count_matching(conn: sqlite3.Connection, log_filter: LogFilter) -> int:
     """How many logs log_filter selects."""
     return count(conn, log_filter)[0]
+
+
+def histogram(conn: sqlite3.Connection, log_filter: LogFilter, edges: list[int]) -> list[dict[int, int]]:
+    """
+    How many logs log_filter selects in each bucket [edges[i], edges[i + 1]) (UTC epoch seconds,
+    increasing), by severity number: one {severity: count} per bucket, by each log's own time.
+    The filter's own time bounds still apply. A sealed day file's whole hours are summed from the
+    catalogue when the filter has no search words or ids, every edge is on a UTC hour, and the
+    catalogue's host names select what the host filter does in that file (_catalogue_hosts_exact);
+    the rest is grouped in the files on (time, severity), which idx_logs_time_sev covers.
+    """
+    buckets: list[dict[int, int]] = [{} for _ in range(max(len(edges) - 1, 0))]
+    if not buckets:
+        return buckets
+    # Every edge is a multiple of the step, so rows grouped by step never straddle an edge
+    step = math.gcd(*edges)
+    first, last = edges[0], edges[-1]
+
+    def add(start_s: int, severity: int, cnt: int) -> None:
+        if first <= start_s < last:
+            group = buckets[bisect.bisect_right(edges, start_s) - 1]
+            group[severity] = group.get(severity, 0) + cnt
+
+    bounded = dataclasses.replace(
+        log_filter,
+        from_ts=_later_iso(log_filter.from_ts, first),
+        to_ts=_earlier_iso(log_filter.to_ts, last),
+    )
+    found = _parts_for(conn, bounded)
+    if not found:
+        return buckets
+    query = _PartQuery.prepare(conn, bounded)
+    use_catalogue = step % 3600 == 0 and not (bounded.query or bounded.log_ids)
+    for part in found:
+        if use_catalogue and part.sealed and _catalogue_hosts_exact(conn, part, query.log_filter.sources):
+            _histogram_from_catalogue(conn, part, query, add)
+        else:
+            _histogram_part(part, query, step, add)
+    return buckets
+
+
+def _later_iso(bound: Optional[str], floor_s: int) -> str:
+    """The later of a stored ISO time bound (None: no bound) and floor_s, as a stored ISO time."""
+    floor_iso = us_to_iso(floor_s * 1_000_000)
+    if bound is None:
+        return floor_iso
+    return bound if iso_to_us(bound) > floor_s * 1_000_000 else floor_iso
+
+
+def _earlier_iso(bound: Optional[str], ceiling_s: int) -> str:
+    """The earlier of a stored ISO time bound (None: no bound) and ceiling_s, as a stored ISO time."""
+    ceiling_iso = us_to_iso(ceiling_s * 1_000_000)
+    if bound is None:
+        return ceiling_iso
+    return bound if iso_to_us(bound) < ceiling_s * 1_000_000 else ceiling_iso
+
+
+def _histogram_part(
+    part: day_store.Part, query: _PartQuery, step: int, add: Callable[[int, int, int], None]
+) -> None:
+    """histogram() for one part, grouped in its file by time step and severity."""
+    where_sql, params = query.where(part)
+    if part.legacy:
+        moment = "unixepoch(logs.timestamp) / :hist_step"
+        run_step = step
+    else:
+        moment = "logs.ts / :hist_step"
+        run_step = step * 1_000_000
+    sql = f"SELECT {moment} AS slot, logs.severity, COUNT(*) FROM logs {where_sql} GROUP BY slot, logs.severity"
+    cursor = part.conn.cursor()
+
+    def _run(run_params: dict[str, Any]) -> None:
+        for slot, severity, cnt in cursor.execute(sql, {**run_params, "hist_step": run_step}).fetchall():
+            if slot is not None:
+                add(slot * step, severity, cnt)
+
+    execute_with_fts_fallback(_run, params, query.log_filter.query, empty=None)
+
+
+def _catalogue_hosts_exact(conn: sqlite3.Connection, part: day_store.Part, sources: tuple[str, ...]) -> bool:
+    """
+    True when the catalogue's host names select what an expanded host filter selects in a sealed
+    file. The filter takes a row by its host name, or by its address unless it is a Docker row;
+    the catalogue keeps only the name. So the file's stored sources (every distinct address, host
+    and kind, when the list is complete) must show that each row from an address in the filter
+    also has a host name in it. Docker rows are not set apart here, which only sends a file to be
+    read when it need not be.
+    """
+    if not sources:
+        return True
+    rows = conn.execute(
+        "SELECT source_ip, host FROM log_file_sources WHERE day = ? LIMIT ?",
+        (part.day, day_store.SOURCES_STORED_LIMIT),
+    ).fetchall()
+    if len(rows) >= day_store.SOURCES_STORED_LIMIT or (not rows and part.row_count):
+        return False
+    wanted = set(sources)
+    return all(host in wanted for ip, host in rows if ip in wanted)
+
+
+def _histogram_from_catalogue(
+    conn: sqlite3.Connection,
+    part: day_store.Part,
+    query: _PartQuery,
+    add: Callable[[int, int, int], None],
+) -> None:
+    """
+    histogram() for a sealed day file: its whole hours inside the filter's range from the
+    catalogue, and the part hours at either end of the range from the file.
+    """
+    log_filter = query.log_filter
+    from_us = iso_to_us(log_filter.from_ts) if log_filter.from_ts else 0
+    to_us = iso_to_us(log_filter.to_ts) if log_filter.to_ts else 0
+    # The filter's bounds are inclusive; the whole hours are those that start at or after the
+    # start and end at or before the end
+    whole_from = -(-from_us // 3_600_000_000) * 3600
+    whole_to = (to_us // 3_600_000_000) * 3600
+    criteria, values = "", []
+    if log_filter.severity_max is not None:
+        criteria += " AND severity <= ?"
+        values.append(log_filter.severity_max)
+    for column, names in (("host", log_filter.sources), ("app", log_filter.apps)):
+        if names:
+            criteria += f" AND {column} IN ({', '.join('?' * len(names))})"
+            values.extend(names)
+    if whole_to > whole_from:
+        rows = conn.execute(
+            "SELECT hour, severity, SUM(count) FROM log_file_counts WHERE day = ? AND hour >= ? AND hour < ?"
+            f"{criteria} GROUP BY hour, severity",
+            (part.day, whole_from, whole_to, *values),
+        ).fetchall()
+        for hour, severity, cnt in rows:
+            add(hour, severity, cnt)
+    else:
+        whole_from = whole_to = None  # type: ignore[assignment]
+
+    # The rest of the range: before the first whole hour and after the last (or all of it)
+    pieces = (
+        [(from_us, whole_from * 1_000_000 - 1), (whole_to * 1_000_000, to_us)]
+        if whole_from is not None
+        else [(from_us, to_us)]
+    )
+    for start_us, end_us in pieces:
+        if end_us < start_us or not part.overlaps(start_us, end_us):
+            continue
+        piece = dataclasses.replace(
+            log_filter, from_ts=us_to_iso(start_us), to_ts=us_to_iso(end_us)
+        )
+        _histogram_part(part, _PartQuery(piece, query.docker_names), 3600, add)
 
 
 _GET_MANY_LEGACY = "id, timestamp, source_ip, source_alias, app_name, severity, message, raw"

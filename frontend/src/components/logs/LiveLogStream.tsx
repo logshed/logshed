@@ -51,6 +51,9 @@ import { DeleteSelectedDialog } from './DeleteSelectedDialog.tsx';
 import { DownloadLogsDialog, DownloadScope } from './DownloadLogsDialog.tsx';
 import { ColumnResizeHandle } from './ColumnResizeHandle.tsx';
 import { ResizableColumn, useColumnWidths } from './useColumnWidths.ts';
+import { VolumeHistogram } from './VolumeHistogram.tsx';
+import { readBrowserPref, writeBrowserPref } from '../../utils/browserPrefs.ts';
+
 import { Button } from '../common/Button.tsx';
 import { ConsoleEmptyKind, ConsoleEmptyState } from './ConsoleEmptyState.tsx';
 import { StreamLoadNote } from './StreamLoadNote.tsx';
@@ -58,6 +61,9 @@ import { useSkippedNote } from './useSkippedNote.ts';
 import { useNearLimit } from '../../utils/nearLimit.ts';
 import { fetchAliases, saveAlias } from '../../api/aliases.ts';
 import { useAlias } from '../../context/AliasContext.tsx';
+
+// Whether the volume histogram shows, remembered by this browser
+const HISTOGRAM_PREF = 'console.histogram.v1';
 
 // Loaded on first use, not with the Console
 const CreateDropRuleModal = React.lazy(() =>
@@ -277,6 +283,35 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   }, [applyFiltersNow]);
 
   const handleFilterChange = useCallback((next: LogFilterParams) => setFilters(withHostAppLists(next)), []);
+
+  // The volume histogram, shown or hidden as this browser last left it
+  const [histogramShown, setHistogramShown] = useState<boolean>(
+    () => readBrowserPref(HISTOGRAM_PREF, (v) => (typeof v === 'boolean' ? v : null)) ?? false,
+  );
+  const toggleHistogram = useCallback(() => {
+    setHistogramShown((shown) => {
+      writeBrowserPref(HISTOGRAM_PREF, !shown);
+      return !shown;
+    });
+  }, []);
+  // A click on a bar zooms to its span as a new browser history entry (the filters otherwise
+  // replace the current one), so Back returns to the range before the zoom
+  const zoomToRange = useCallback(
+    (from: string, to: string) => {
+      try {
+        window.history.pushState(null, '', window.location.pathname + window.location.search);
+      } catch {
+        // No history entry: the zoom still applies
+      }
+      handleFilterChange({ ...filters, from, to });
+    },
+    [filters, handleFilterChange],
+  );
+  useEffect(() => {
+    const onPopState = () => setFilters(withHostAppLists(parseFiltersFromUrl()));
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const sourcesKey = activeSources.join(',');
   const appsKey = activeApps.join(',');
@@ -678,6 +713,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       onToggleAutoScroll={() => (autoScroll ? setAutoScroll(false) : buffer.resumeAutoScroll())}
       onClearBuffer={clearLogsBuffer}
       onDownload={() => setDownloadScope('search')}
+      histogramShown={histogramShown}
+      onToggleHistogram={toggleHistogram}
     />
   );
 
@@ -709,6 +746,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div className="bg-surface px-3 py-1.5 border-b border-line flex flex-nowrap items-center justify-between gap-2 text-xs select-none relative overflow-hidden">
             {streamToolbar}
           </div>
+        )}
+
+        {histogramShown && (
+          <VolumeHistogram
+            filters={filters}
+            timeZone={serverTimezone || undefined}
+            isMobile={isMobile}
+            onZoom={zoomToRange}
+          />
         )}
       </div>
 

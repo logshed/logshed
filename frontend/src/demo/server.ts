@@ -122,6 +122,54 @@ export function logFilter(params: URLSearchParams): (log: LogEntry) => boolean {
   };
 }
 
+// The histogram's bucket sizes in seconds, as the server's: about 60 bars, whole hours above 12 hours
+const HISTOGRAM_BUCKETS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800];
+const RELATIVE_MS: Record<string, number> = { '15m': 900_000, '1h': 3_600_000, '6h': 21_600_000, '24h': 86_400_000, '7d': 604_800_000 };
+
+/** A From or To value as epoch ms: ISO, a relative preset or since_midnight (browser time in the demo). */
+function demoTime(value: string | null, now: number): number | null {
+  if (!value) return null;
+  if (value === 'since_midnight') return new Date(new Date(now).setHours(0, 0, 0, 0)).getTime();
+  if (RELATIVE_MS[value]) return now - RELATIVE_MS[value];
+  const parsed = Date.parse(value);
+  return isNaN(parsed) ? null : parsed;
+}
+
+/** The volume histogram over the demo's logs, bucketed as the server does (on UTC, not the server clock). */
+export function demoHistogram(q: URLSearchParams, now: number = Date.now()) {
+  const to = demoTime(q.get('to'), now) ?? now;
+  const from = demoTime(q.get('from'), now) ?? to - 3_600_000;
+  const span = Math.max(to - from, 1000) / 1000;
+  const size = HISTOGRAM_BUCKETS.find((s) => !(s < 3600 && span > 43200) && span / s <= 60) ?? 604800;
+  const sizeMs = size * 1000;
+  const first = Math.floor(from / sizeMs) * sizeMs;
+  const params = new URLSearchParams(q);
+  params.set('from', new Date(from).toISOString());
+  params.set('to', new Date(to).toISOString());
+  const match = logFilter(params);
+  const buckets = [];
+  for (let start = first; start < to; start += sizeMs) {
+    buckets.push({ start: Math.max(start, from), end: Math.min(start + sizeMs, to), error: 0, warning: 0, info: 0, debug: 0 });
+  }
+  for (const log of logs) {
+    if (!match(log)) continue;
+    const b = buckets[Math.floor((Date.parse(log.timestamp) - first) / sizeMs)];
+    if (!b) continue;
+    const s = log.severity;
+    if (s <= 3) b.error++;
+    else if (s === 4) b.warning++;
+    else if (s <= 6) b.info++;
+    else b.debug++;
+  }
+  const iso = (ms: number) => new Date(ms).toISOString();
+  return {
+    range_from: iso(from),
+    range_to: iso(to),
+    bucket_seconds: size,
+    buckets: buckets.map((b) => ({ ...b, start: iso(b.start), end: iso(b.end) })),
+  };
+}
+
 export class DemoHttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -283,6 +331,7 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     return { logs: found.slice(offset, offset + limit), total: found.length, limit, offset, total_capped: false };
   }],
   ['GET', /^\/api\/logs\/facets$/, () => facets()],
+  ['GET', /^\/api\/logs\/histogram$/, (_m, q) => demoHistogram(q)],
   ['GET', /^\/api\/logs\/(\d+)\/context$/, (m, q) => logContext(Number(m[1]), q)],
   ['DELETE', /^\/api\/logs\/\d+$/, () => { throw notInDemo('Deleting logs'); }],
   ['POST', /^\/api\/logs\/delete(\/preview)?$/, () => { throw notInDemo('Deleting logs'); }],

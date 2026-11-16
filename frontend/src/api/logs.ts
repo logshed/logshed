@@ -16,10 +16,49 @@ export interface LogListResult {
   total_capped?: boolean;
 }
 
+/** One bar of the volume histogram: its span (UTC ISO times) and its logs by severity group. */
+export interface LogHistogramBucket {
+  start: string;
+  end: string;
+  error: number;
+  warning: number;
+  info: number;
+  debug: number;
+}
+
+export interface LogHistogram {
+  range_from: string;
+  range_to: string;
+  bucket_seconds: number;
+  buckets: LogHistogramBucket[];
+}
+
 export async function fetchLogs(
   params: LogFilterParams = {},
   options: { signal?: AbortSignal } = {},
 ): Promise<LogListResult> {
+  const searchParams = filterSearchParams(params);
+  if (params.limit !== undefined) searchParams.set('limit', params.limit.toString());
+  if (params.offset !== undefined) searchParams.set('offset', params.offset.toString());
+
+  const qs = searchParams.toString();
+  return apiFetch<LogListResult>(`/api/logs${qs ? `?${qs}` : ''}`, options.signal ? { signal: options.signal } : {});
+}
+
+/**
+ * Log counts per time bucket by severity group, for the Console's volume histogram, over the
+ * filters' range (the last hour when they have no From).
+ */
+export async function fetchLogHistogram(
+  params: LogFilterParams = {},
+  options: { signal?: AbortSignal } = {},
+): Promise<LogHistogram> {
+  const qs = filterSearchParams(params).toString();
+  return apiFetch<LogHistogram>(`/api/logs/histogram${qs ? `?${qs}` : ''}`, options.signal ? { signal: options.signal } : {});
+}
+
+/** The query string of a Console filter: search, severity, hosts, apps and time bounds. */
+function filterSearchParams(params: LogFilterParams): URLSearchParams {
   const searchParams = new URLSearchParams();
   if (params.query) searchParams.set('query', params.query);
   if (params.severity_max !== undefined && params.severity_max !== null) {
@@ -34,11 +73,7 @@ export async function fetchLogs(
   }
   if (params.from) searchParams.set('from', params.from);
   if (params.to) searchParams.set('to', params.to);
-  if (params.limit !== undefined) searchParams.set('limit', params.limit.toString());
-  if (params.offset !== undefined) searchParams.set('offset', params.offset.toString());
-
-  const qs = searchParams.toString();
-  return apiFetch<LogListResult>(`/api/logs${qs ? `?${qs}` : ''}`, options.signal ? { signal: options.signal } : {});
+  return searchParams;
 }
 
 /** The host and app lists of a filter, from its list or its single-value field. */

@@ -3,6 +3,7 @@ Log querying, streaming (SSE), and context API endpoints for LogShed.
 """
 
 import asyncio
+import datetime
 import time
 import logging
 import sqlite3
@@ -21,10 +22,13 @@ from app.models import (
     LogDeleteResponse,
     LogExportRequest,
     LogFacetsResponse,
+    LogHistogramBucket,
+    LogHistogramResponse,
     LogListResponse,
 )
-from app.core.utils import AliasIndex, parse_multi_values
+from app.core.utils import AliasIndex, get_server_tzinfo, parse_multi_values
 from app.services.log_facets import get_facets
+from app.services.log_histogram import build_histogram
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 from app.services.log_export import check_export_ids, export_logs
 from app.services import log_store
@@ -91,6 +95,49 @@ async def list_logs(
         limit=limit,
         offset=offset,
         total_capped=total_capped,
+    )
+
+
+def _iso(epoch_s: int) -> str:
+    return datetime.datetime.fromtimestamp(epoch_s, datetime.timezone.utc).isoformat()
+
+
+@router.get("/histogram", response_model=LogHistogramResponse)
+async def log_histogram(
+    query: Optional[str] = Query(None, description="Full-text search query (FTS5)"),
+    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip (multi-value supported)"),
+    app_name: Optional[list[str]] = Query(None, description="Filter by application name (multi-value supported)"),
+    severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0-7, lower is more severe)"),
+    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start or relative duration; none: the last hour"),
+    to: Optional[str] = Query(None, description="ISO datetime end or relative duration; none: now"),
+    request: Request = None,  # type: ignore[assignment]
+    user: dict = Depends(get_current_user),
+) -> LogHistogramResponse:
+    """
+    Log counts per time bucket, by severity group (error and worse, warning, notice and info,
+    debug), for the Console's volume histogram. Takes the same filters as GET /api/logs. About
+    60 buckets on the server's clock; the first and last are cut to the range.
+    """
+    check_ui_filter_value_counts(source=source, app_name=app_name)
+    try:
+        log_filter = LogFilter.parse(
+            query=query, sources=source, apps=app_name, severity_max=severity_max, from_=from_, to=to
+        )
+    except InvalidTimeBound as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    tz = get_server_tzinfo()
+
+    try:
+        result = await run_search_query(lambda conn: build_histogram(conn, log_filter, tz), request)
+    except sqlite3.OperationalError as exc:
+        raise db_busy_exception(exc, "counting logs for the histogram")
+    return LogHistogramResponse(
+        range_from=_iso(result.range_from),
+        range_to=_iso(result.range_to),
+        bucket_seconds=result.bucket_seconds,
+        buckets=[
+            LogHistogramBucket(start=_iso(b.start), end=_iso(b.end), **b.counts) for b in result.buckets
+        ],
     )
 
 

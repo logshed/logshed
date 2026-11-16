@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bookmark, Box, Clock, Download, Pause, Play, Server, Trash2 } from 'lucide-react';
+import { Bookmark, Box, ChartColumn, Clock, Download, Pause, Play, Server, Trash2 } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
 import { buttonClass, IconButton } from '../common/Button.tsx';
@@ -33,6 +33,9 @@ interface StreamToolbarProps {
   onClearBuffer: () => void;
   /** Opens the Download Logs dialog for the current search (phones have it in the filter drawer). */
   onDownload: () => void;
+  /** Whether the volume histogram shows above the list */
+  histogramShown: boolean;
+  onToggleHistogram: () => void;
 }
 
 /**
@@ -62,6 +65,8 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
   onToggleAutoScroll,
   onClearBuffer,
   onDownload,
+  histogramShown,
+  onToggleHistogram,
 }) => (
   <>
     {/* Left: Quick Filter Pills */}
@@ -205,6 +210,25 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
           <span>{autoScroll ? (isMobile ? 'Scroll' : 'Auto-Scroll ON') : 'Paused'}</span>
         </button>
       )}
+
+      {/* Sized as the auto-scroll button beside it (not IconButton, whose phone tap size is taller) */}
+      <button
+        type="button"
+        onClick={onToggleHistogram}
+        aria-pressed={histogramShown}
+        aria-label={histogramShown ? 'Hide the log volume chart' : 'Show the log volume chart'}
+        title={histogramShown ? 'Hide the log volume chart' : 'Show the log volume chart'}
+        className={`flex items-center px-1.5 py-1 rounded text-xs border transition cursor-pointer ${
+          histogramShown
+            ? 'bg-raised text-accent-400 border-accent-800 hover:bg-raised-strong'
+            : 'text-fg-muted border-line hover:text-fg hover:bg-raised'
+        }`}
+      >
+        {/* A line box as tall as the auto-scroll button's text, around the icon */}
+        <span className="flex items-center h-4">
+          <ChartColumn className="w-3.5 h-3.5" />
+        </span>
+      </button>
 
       {/* Left out on phones to leave room for the quick filters */}
       {!isMobile && (
