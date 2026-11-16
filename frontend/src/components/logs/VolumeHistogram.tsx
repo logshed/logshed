@@ -6,8 +6,17 @@ import { DAY_MS, buildTimeTicks, formatTimePoint, formatTimeTick } from '../../u
 
 // Filter edits wait as long as the list's search does, so typing sends one request
 export const HISTOGRAM_DEBOUNCE_MS = 300;
-// While the Console follows new logs, the counts are fetched again this long after each answer
+// While the Console follows new logs, the counts are fetched again this long after each answer:
+// a sixth of a bar, between these bounds, so a 24-hour chart of hour bars on a busy day is not
+// recounted every 10 s (about 1.8 s of the server's time for an 8M-row day)
 export const HISTOGRAM_REFRESH_MS = 10_000;
+export const HISTOGRAM_REFRESH_MAX_MS = 60_000;
+
+/** How long after an answer the counts are fetched again, for bars of bucketSeconds. */
+export function refreshDelayMs(bucketSeconds: number | undefined): number {
+  if (!bucketSeconds) return HISTOGRAM_REFRESH_MS;
+  return Math.min(HISTOGRAM_REFRESH_MAX_MS, Math.max(HISTOGRAM_REFRESH_MS, (bucketSeconds * 1000) / 6));
+}
 
 const GROUPS = [
   { key: 'error', label: 'Error and worse', color: 'var(--color-danger-500)', swatch: 'bg-danger-500' },
@@ -133,11 +142,13 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
       controller?.abort();
       controller = new AbortController();
       let failed = false;
+      let bucketSeconds: number | undefined;
       try {
         const result = await fetchLogHistogram(filtersRef.current, { signal: controller.signal });
         if (cancelled) return;
         setData(result);
         setDataKey(key);
+        bucketSeconds = result.bucket_seconds;
         setError(null);
       } catch (err) {
         if (cancelled || (err instanceof DOMException && err.name === 'AbortError')) return;
@@ -145,7 +156,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         failed = true;
       }
       // A closed range is fetched once, but tried again after a failure
-      if (!cancelled && (live || failed)) schedule(HISTOGRAM_REFRESH_MS);
+      if (!cancelled && (live || failed)) schedule(failed ? HISTOGRAM_REFRESH_MS : refreshDelayMs(bucketSeconds));
     };
     // Back on the tab: fetch at once if a fetch was skipped while it was hidden
     const onVisible = () => {
@@ -241,6 +252,9 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                   dataKey={g.key as GroupKey}
                   stackId="volume"
                   fill={g.color}
+                  // A line in the band's colour between stacked parts, whose colours are close to each other
+                  stroke="var(--color-surface)"
+                  strokeWidth={1}
                   isAnimationActive={false}
                   cursor="pointer"
                   onClick={(entry: { payload?: VolumeBar }) => {

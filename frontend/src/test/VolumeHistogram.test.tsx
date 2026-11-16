@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as logsApi from '../api/logs.ts';
 import type { LogHistogram } from '../api/logs.ts';
-import { HISTOGRAM_DEBOUNCE_MS, HISTOGRAM_REFRESH_MS, VolumeHistogram } from '../components/logs/VolumeHistogram.tsx';
+import { HISTOGRAM_DEBOUNCE_MS, HISTOGRAM_REFRESH_MS, refreshDelayMs, VolumeHistogram } from '../components/logs/VolumeHistogram.tsx';
 import { demoHistogram } from '../demo/server.ts';
 
 // ResponsiveContainer measures nothing in jsdom: give the chart a fixed size so its bars render
@@ -143,11 +143,26 @@ describe('VolumeHistogram', () => {
   });
 
   it('fetches again every few seconds while the Console follows new logs', async () => {
+    // Minute bars: a sixth of a bar is under the 10 s floor
+    fetchSpy.mockResolvedValue({ ...HOUR, bucket_seconds: 60 });
     render(<VolumeHistogram filters={{ from: '1h' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_REFRESH_MS));
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_REFRESH_MS));
     expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('refreshes less often for wide bars', async () => {
+    // HOUR has 30-minute bars: a sixth of a bar is over the 60 s ceiling
+    expect(refreshDelayMs(15)).toBe(10_000);
+    expect(refreshDelayMs(300)).toBe(50_000);
+    expect(refreshDelayMs(3600)).toBe(60_000);
+    render(<VolumeHistogram filters={{ from: '1h' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    await act(() => vi.advanceTimersByTimeAsync(59_000));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it('fetches a closed range once', async () => {
@@ -159,6 +174,7 @@ describe('VolumeHistogram', () => {
   });
 
   it('stops fetching while the tab is hidden and catches up when it is shown', async () => {
+    fetchSpy.mockResolvedValue({ ...HOUR, bucket_seconds: 60 });
     render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
     setVisibility('hidden');
