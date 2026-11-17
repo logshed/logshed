@@ -67,11 +67,6 @@ export function useLogSelection(logsRef: MutableRefObject<ProcessedLogEntry[]>, 
     lastSelectedLogIndexRef.current = null;
   }, []);
 
-  /** Ticks exactly these logs. */
-  const selectOnly = useCallback((logs: LogEntry[]) => {
-    setSelectedLogIds(new Set(logs.map((l) => l.id)));
-  }, []);
-
   /** Unticks logs that left the list (deleted), and forgets the anchor. */
   const forget = useCallback((ids: Iterable<number>) => {
     lastSelectedLogIndexRef.current = null;
@@ -82,5 +77,5 @@ export function useLogSelection(logsRef: MutableRefObject<ProcessedLogEntry[]>, 
     });
   }, []);
 
-  return { selectedLogIds, toggleSelectLog, shiftAnchor, clearAnchor, selectAll, deselectAll, selectOnly, forget };
+  return { selectedLogIds, toggleSelectLog, shiftAnchor, clearAnchor, selectAll, deselectAll, forget };
 }

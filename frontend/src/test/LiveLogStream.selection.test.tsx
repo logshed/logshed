@@ -86,6 +86,25 @@ describe('Console selection and the log drawer', () => {
     expect(onDiagnoseAi.mock.calls[0][0].map((l: { id: number }) => l.id)).toEqual([102]);
     // Still open on log 102, so closing the AI dialog shows it again without a reopen
     expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument();
+    // Explaining a log ticks nothing, as the row's own Explain with AI icon does
+    expect(screen.queryByText(/logs? selected/)).toBeNull();
+  });
+
+  it('leaves the ticked rows as they were when the drawer explains another log', async () => {
+    const onDiagnoseAi = vi.fn();
+    renderWithContext(<LiveLogStream onDiagnoseAi={onDiagnoseAi} />);
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+
+    fireEvent.click(document.querySelectorAll('.log-row')[0].firstElementChild as HTMLElement); // tick log 101
+    expect(screen.getByText('1 log selected')).toBeInTheDocument();
+    fireEvent.click(document.querySelectorAll('.log-row')[1]); // open log 102 in the drawer
+    await waitFor(() => expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Explain with AI/i }));
+    expect(onDiagnoseAi.mock.calls[0][0].map((l: { id: number }) => l.id)).toEqual([102]);
+    expect(screen.getByText('1 log selected')).toBeInTheDocument();
+    const ticked = document.querySelectorAll('.log-row[aria-selected="true"]');
+    expect(Array.from(ticked).map((r) => r.getAttribute('data-index'))).toEqual(['0']);
   });
 
   it('performs Shift-Click range selection across multiple hosts without error', async () => {

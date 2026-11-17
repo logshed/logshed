@@ -651,10 +651,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     scrollToTopLive('instant');
   }, [deselectAll, scrollToTopLive]);
 
-  // The logs fetched around one in the drawer join the list (in time order) and become the selection
-  const selectAndAnalyze = (target: LogEntry[]) => {
+  // The logs fetched around one in the drawer join the list (in time order). The ticked rows stay as
+  // they were, as when a row's own Explain with AI icon is used: the AI dialog lists what it sends.
+  const explainFromDrawer = (target: LogEntry[]) => {
     buffer.mergeRows(target);
-    selection.selectOnly(target);
     onDiagnoseAi(target);
   };
 
@@ -981,8 +981,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           timeZone={serverTimezone}
           aiEnabled={aiEnabled}
           // The AI dialog opens on top of the drawer, so closing it shows the same log again
-          onExplainWithAi={(log, ctxLogs) => selectAndAnalyze(ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log])}
-          onInspectWithContext={selectAndAnalyze}
+          onExplainWithAi={(log, ctxLogs) => explainFromDrawer(ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log])}
+          onInspectWithContext={explainFromDrawer}
           // Every action opens its dialog on top of the drawer, which stays on the same log
           onAddAlias={async (ip) => {
             const alias = sources.aliases[ip];
