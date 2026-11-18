@@ -20,6 +20,7 @@ import dataclasses
 import datetime
 import functools
 import ipaddress
+import logging
 import math
 import sqlite3
 import threading
@@ -49,6 +50,8 @@ from app.services.log_query import (
     notify_fts_worker,
     run_newest_first,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Writing
@@ -585,7 +588,30 @@ def _delete_in_parts(
                 )
         finally:
             day_store.refresh_figures(conn, part.day)
+    _delete_emptied_files(conn, [part.day for part in found if not part.legacy])
     return deleted
+
+
+def _delete_emptied_files(conn: sqlite3.Connection, days: list[str]) -> None:
+    """
+    Delete the files of these days that a delete left with no logs, as the prune would when they
+    expire: an empty file keeps its size on disk and its row on the Storage page until then. Only
+    days before yesterday (UTC), as in delete_everything: today's and yesterday's may still receive
+    a batch waiting in the ingest queue. After the loop over the parts, because delete_file closes
+    this thread's day-file connections. A failure is only logged: the logs are already deleted.
+    """
+    yesterday = (datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)).isoformat()
+    states = dict(day_store.catalogue_days(conn))
+    for day in days:
+        state = states.get(day)
+        if day < yesterday and state in ("open", "sealed") and day_store.stored_count(conn, day, state) == 0:
+            try:
+                day_store.delete_file(conn, day)
+            except (OSError, sqlite3.Error) as e:
+                # The logs are already gone; the empty file goes when it expires (or at start-up, if marked deleting)
+                logger.warning("Could not delete the emptied day file of %s: %s", day, e)
+            else:
+                logger.info("Deleted the day file of %s: a delete left it with no logs", day)
 
 
 def _delete_legacy_where(

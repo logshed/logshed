@@ -179,6 +179,37 @@ class TestSealing:
         with open_db(three_days) as conn:
             assert log_store.count(conn, LogFilter(), "source")[2] == {"storage": 6}
 
+    @pytest.mark.parametrize("sealed", [True, False])
+    def test_a_targeted_delete_that_empties_an_old_days_file_deletes_the_file(self, three_days, sealed):
+        """The maintainer's report (2026-11-18): the emptied file stayed with 0 logs and its size until it expired."""
+        if sealed:
+            _seal_all(three_days)
+        path = day_files.day_path(three_days, D2)
+        with open_db(three_days) as conn:
+            deleted = log_store.delete(conn, LogFilter.parse(from_=f"{D2}T00:00:00Z", to=f"{D2}T23:59:59Z"), 100, lambda: None)
+        assert deleted == 2
+        assert not path.exists() and not Path(f"{path}-wal").exists()
+        assert set(_catalogue(three_days)) - {day_files.LEGACY_DAY} == {D1, D3}
+        with open_db(three_days) as conn:
+            assert log_store.count(conn, LogFilter())[0] == 5
+
+    def test_a_failure_to_delete_the_emptied_file_still_reports_the_deleted_logs(self, three_days):
+        with mock.patch.object(day_store, "delete_file", side_effect=OSError("read-only")), open_db(three_days) as conn:
+            deleted = log_store.delete(conn, LogFilter.parse(from_=f"{D2}T00:00:00Z", to=f"{D2}T23:59:59Z"), 100, lambda: None)
+        assert deleted == 2
+        assert day_files.day_path(three_days, D2).exists()
+
+    def test_a_targeted_delete_keeps_the_emptied_files_of_today_and_yesterday(self, db):
+        """A batch waiting in the ingest queue may still be written to them."""
+        today = datetime.datetime.now(_UTC).date()
+        days = [today.isoformat(), (today - datetime.timedelta(days=1)).isoformat()]
+        _write(db, [_row(day, 0, app="smartd") for day in days])
+        index_pending_logs(db)
+        with open_db(db) as conn:
+            assert log_store.delete(conn, LogFilter(apps=("smartd",)), 100, lambda: None) == 2
+        assert {day: entry["row_count"] for day, entry in _catalogue(db).items() if day in days} == dict.fromkeys(days, 0)
+        assert all(day_files.day_path(db, day).exists() for day in days)
+
 
     def _seen_opening(self, path: Path) -> tuple[log_store.SeenNames, list[str]]:
         """The Console's host and app lists, and the day files opened to build them."""
