@@ -104,7 +104,7 @@ async def test_list_is_newest_first_from_the_names(env, client):
 # Names from 1.4.0's previews (schemas) next to names with LogShed versions, with "-<n>" suffixes
 OLD_PRE = "logshed-backup-pre-v3-to-v4-20261118T093900Z.tar.gz"
 OLD_MANUAL = "logshed-backup-manual-v4-20261118T100000Z-2.tar.gz"
-NEW_UPGRADE = "logshed-backup-upgrade-1.3-to-1.4.0-beta.1-20261119T080000Z.tar.gz"
+NEW_UPGRADE = "logshed-backup-upgrade-1.3-to-1.4.0-beta.1-settings-20261119T080000Z.tar.gz"
 NEW_MANUAL = "logshed-backup-manual-1.4.0-20261120T080000Z-3.tar.gz"
 
 
@@ -122,11 +122,22 @@ async def test_old_and_new_names_list_download_and_delete(env, client):
         (OLD_MANUAL, "manual", None, "1.4.x", 4, None),
         (OLD_PRE, "pre-migration", "1.3.x", "1.4.x", 3, 4),
     ]
+    # The upgrade to 1.4 leaves the logs out; the new name says so, the old one by its schemas
+    assert [b["logs_included"] for b in body["backups"]] == [True, False, True, False]
     for name in (OLD_PRE, OLD_MANUAL, NEW_UPGRADE, NEW_MANUAL):
         response = await client.get(f"/api/system/backups/{name}/download")
         assert response.status_code == 200 and len(response.content) > 0
         assert (await client.delete(f"/api/system/backups/{name}")).status_code == 200
     assert (await client.get("/api/system/backups")).json()["backups"] == []
+
+
+async def test_only_an_upgrade_without_logs_is_settings_only(env, client):
+    # 1.2 to 1.3 rewrote the logs, so its backup holds them; so does a new upgrade name without "-settings"
+    _fake_archive(env, "logshed-backup-pre-v2-to-v3-20261101T000000Z.tar.gz")
+    _fake_archive(env, "logshed-backup-pre-v2-to-v4-20261102T000000Z.tar.gz")
+    _fake_archive(env, "logshed-backup-upgrade-1.2-to-1.4.0-20261103T000000Z.tar.gz")
+    body = (await client.get("/api/system/backups")).json()
+    assert [b["logs_included"] for b in body["backups"]] == [True, True, True]
 
 
 async def test_create_backup_now_makes_an_archive_while_logs_are_written(env, client):

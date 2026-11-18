@@ -183,6 +183,11 @@ def test_step_that_keeps_log_rows_gets_a_backup_without_logs(db, monkeypatch, ca
     assert "leaving out the stored logs (database " in caplog.text
 
     (archive,) = _archives(db)
+    # The name says it holds no logs, so the listing knows without unpacking it
+    assert db_backup.ARCHIVE_NAME_RE.match(archive.name)["kind"] == (
+        f"upgrade-{migrations_mod.SCHEMA_RELEASES[LATEST]}-to-{db_backup.name_version()}-settings"
+    )
+    assert [b.logs_included for b in db_backup.list_backups(db_backup.backups_dir(db))] == [False]
     manifest, restored = _extract(archive, db.parent / "x")
     assert manifest["files"][0]["omitted_tables"] == ["logs", "logs_fts"]
     assert _integrity(restored) == "ok"
@@ -483,14 +488,23 @@ def test_every_version_gives_a_name_the_folder_reads_back(tmp_path, monkeypatch,
     now = datetime.datetime(2026, 11, 20, 8, 0, tzinfo=datetime.timezone.utc)
     folder = tmp_path / "backups"
     folder.mkdir()
-    for kind in (db_backup.manual_kind(), db_backup.manual_kind(), db_backup.upgrade_kind("1.3")):
+    kinds = (db_backup.manual_kind(), db_backup.manual_kind(), db_backup.upgrade_kind("1.3"), db_backup.upgrade_kind("1.3", True))
+    for kind in kinds:
         (folder / db_backup._free_name(folder, kind, now)).write_bytes(b"x")
-    found = sorted((b.path.name, b.kind, b.from_release, b.release) for b in db_backup.list_backups(folder))
+    found = sorted((b.path.name, b.kind, b.from_release, b.release, b.logs_included) for b in db_backup.list_backups(folder))
     assert found == sorted([
-        (f"logshed-backup-manual-{in_name}-20261120T080000Z.tar.gz", "manual", None, in_name),
-        (f"logshed-backup-manual-{in_name}-20261120T080000Z-2.tar.gz", "manual", None, in_name),
-        (f"logshed-backup-upgrade-1.3-to-{in_name}-20261120T080000Z.tar.gz", "pre-migration", "1.3", in_name),
+        (f"logshed-backup-manual-{in_name}-20261120T080000Z.tar.gz", "manual", None, in_name, True),
+        (f"logshed-backup-manual-{in_name}-20261120T080000Z-2.tar.gz", "manual", None, in_name, True),
+        (f"logshed-backup-upgrade-1.3-to-{in_name}-20261120T080000Z.tar.gz", "pre-migration", "1.3", in_name, True),
+        (f"logshed-backup-upgrade-1.3-to-{in_name}-settings-20261120T080000Z.tar.gz", "pre-migration", "1.3", in_name, False),
     ])
+
+
+def test_the_upgrade_from_1_3_is_named_settings_only(db, monkeypatch, roomy_disk):
+    _migrate_to(db, 3, monkeypatch)
+    run_migrations(db)
+    (archive,) = _archives(db)
+    assert archive.name.startswith(f"logshed-backup-upgrade-1.3-to-{db_backup.name_version()}-settings-")
 
 
 def test_every_schema_has_a_release():

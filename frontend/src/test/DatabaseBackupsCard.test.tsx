@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as backupsApi from '../api/backups.ts';
 import * as settingsApi from '../api/settings.ts';
-import { BACKUP_POLL_MS, DatabaseBackupsCard, backupKindLabel, expiryLabel } from '../components/storage/DatabaseBackupsCard.tsx';
+import {
+  BACKUP_POLL_MS,
+  DatabaseBackupsCard,
+  SETTINGS_ONLY_NOTE,
+  backupKindLabel,
+  expiryLabel,
+} from '../components/storage/DatabaseBackupsCard.tsx';
 import { BackupItem, BackupJob } from '../types.ts';
 
 const PRE: BackupItem = {
@@ -12,6 +18,7 @@ const PRE: BackupItem = {
   target_schema: 4,
   from_release: '1.3.x',
   release: '1.4.x',
+  logs_included: false,
   size_bytes: 300 * 1024 * 1024,
   created_at: '2026-11-13T08:00:00+00:00',
   expires_at: '2026-12-13T08:00:00+00:00',
@@ -23,6 +30,7 @@ const MANUAL: BackupItem = {
   schema_version: null,
   target_schema: null,
   release: '1.4.0',
+  logs_included: true,
   size_bytes: 10 * 1024 * 1024,
   created_at: '2026-11-01T12:00:00+00:00',
   expires_at: '2026-12-01T12:00:00+00:00',
@@ -72,6 +80,11 @@ describe('DatabaseBackupsCard', () => {
     expect(within(rows[0]).getByText(/2026-11-13 08:00, 300 MB, expires in 30 days/)).toBeInTheDocument();
     expect(within(rows[1]).getByText('Manual, LogShed 1.4.0')).toBeInTheDocument();
     expect(within(rows[1]).getByText(/expires in 1 day$/)).toBeInTheDocument();
+    // The backup before the 1.4 upgrade holds no logs: its small size is not a failure
+    expect(within(rows[0]).getByText('Settings only, no logs')).toBeInTheDocument();
+    expect(within(rows[0]).getByText(SETTINGS_ONLY_NOTE)).toBeInTheDocument();
+    expect(within(rows[1]).queryByText('Settings only, no logs')).not.toBeInTheDocument();
+    expect(within(rows[1]).queryByText(SETTINGS_ONLY_NOTE)).not.toBeInTheDocument();
     const link = within(rows[0]).getByRole('link', { name: `Download ${PRE.filename}` });
     expect(link).toHaveAttribute('href', `/api/system/backups/${PRE.filename}/download`);
     expect(link).toHaveAttribute('download', PRE.filename);
@@ -159,9 +172,16 @@ describe('DatabaseBackupsCard', () => {
     fireEvent.click(screen.getByRole('button', { name: `Delete ${MANUAL.filename}` }));
     const dialog = await screen.findByTestId('delete-backup-dialog');
     expect(within(dialog).getByText(MANUAL.filename)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Settings only/)).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByTestId('delete-backup-dialog')).not.toBeInTheDocument());
     expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: `Delete ${PRE.filename}` }));
+    const settingsOnly = await screen.findByTestId('delete-backup-dialog');
+    expect(within(settingsOnly).getByText(`Settings only, no logs. ${SETTINGS_ONLY_NOTE}`)).toBeInTheDocument();
+    fireEvent.click(within(settingsOnly).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByTestId('delete-backup-dialog')).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: `Delete ${MANUAL.filename}` }));
     vi.spyOn(backupsApi, 'fetchBackups').mockResolvedValue({ backups: [PRE], total_size_bytes: PRE.size_bytes });

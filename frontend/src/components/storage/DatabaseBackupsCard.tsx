@@ -30,6 +30,9 @@ export function backupKindLabel(item: BackupItem): string {
   return `Manual, ${item.release ? `LogShed ${item.release}` : `schema ${item.schema_version}`}`;
 }
 
+/** What a backup without the logs brings back (the backup before an upgrade that leaves the logs as they are). */
+export const SETTINGS_ONLY_NOTE = 'A restore brings back the settings, rules and history, but no logs.';
+
 export function expiryLabel(days: number): string {
   if (days <= 0) return 'Expires today';
   return days === 1 ? 'Expires in 1 day' : `Expires in ${days} days`;
@@ -245,12 +248,16 @@ export const DatabaseBackupsCard: React.FC<DatabaseBackupsCardProps> = ({
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2.5"
             >
               <div className="min-w-0 space-y-0.5">
-                <p className="text-xs font-medium text-fg">{backupKindLabel(item)}</p>
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-fg">
+                  {backupKindLabel(item)}
+                  {!item.logs_included && <Badge>Settings only, no logs</Badge>}
+                </p>
                 <p className="text-[11px] text-fg-muted font-mono">
                   {formatLocalTimestamp(item.created_at, false, serverTimezone)}, {formatBytes(item.size_bytes)},{' '}
                   {expiryLabel(item.days_until_expiry).toLowerCase()}
                 </p>
                 <p className="text-[11px] text-fg-muted font-mono break-all">{item.filename}</p>
+                {!item.logs_included && <p className="text-[11px] text-fg-muted">{SETTINGS_ONLY_NOTE}</p>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <a
@@ -287,6 +294,9 @@ export const DatabaseBackupsCard: React.FC<DatabaseBackupsCardProps> = ({
           {toDelete ? backupKindLabel(toDelete) : ''}, {toDelete ? formatBytes(toDelete.size_bytes) : ''}
         </p>
         <p className="text-xs text-fg-muted break-all font-mono">{toDelete?.filename}</p>
+        {toDelete && !toDelete.logs_included && (
+          <p className="text-xs text-fg-muted">Settings only, no logs. {SETTINGS_ONLY_NOTE}</p>
+        )}
         <p className="text-xs text-fg-muted">This cannot be undone.</p>
       </ConfirmDialog>
     </Card>

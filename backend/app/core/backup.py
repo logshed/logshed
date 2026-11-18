@@ -69,14 +69,14 @@ FLOOR_FRACTION = 0.10
 LOG_TABLES = ("logs", "logs_fts")
 
 # A LogShed version in an archive name (name_version): the shortest that fits, so a pre-release's
-# "-beta.1" is part of it but the "-settings" and the time after it are not.
+# "-beta.1" is part of it but the "-settings" (a backup without the logs) and the time after it are not.
 _NAME_VERSION = r"[0-9A-Za-z][0-9A-Za-z.]*(?:-[0-9A-Za-z.]+)*?"
 ARCHIVE_NAME_RE = re.compile(
     r"^logshed-backup-(?P<kind>"
     # Names from 1.4.0's previews carried schema numbers; they still list, download, expire and restore.
     # They come first, so "manual-v4" never reads as a version "v4".
     r"pre-v(?P<from>\d+)-to-v(?P<to>\d+)|manual-v(?P<schema>\d+)"
-    r"|upgrade-(?P<from_release>[0-9A-Za-z.]+)-to-(?P<release>" + _NAME_VERSION + r")"
+    r"|upgrade-(?P<from_release>[0-9A-Za-z.]+)-to-(?P<release>" + _NAME_VERSION + r")(?P<settings>-settings)?"
     r"|manual-(?P<manual_release>" + _NAME_VERSION + r"))"
     r"-(?P<stamp>\d{8}T\d{6}Z)(?:-(?P<n>\d+))?\.tar\.gz$"
 )
@@ -133,6 +133,8 @@ class BackupInfo:
     created_at: datetime.datetime
     from_release: Optional[str] = None
     release: Optional[str] = None
+    # False for a backup without the logs; None for an old upgrade name, whose schemas decide (the API reads them)
+    logs_included: Optional[bool] = True
 
     @property
     def expires_at(self) -> datetime.datetime:
@@ -180,11 +182,12 @@ def _info_from_name(match: re.Match, path: Path, size: int, created: datetime.da
     if match["schema"] is not None:
         return BackupInfo(path, "manual", int(match["schema"]), None, size, created)
     if match["from"] is not None:
-        return BackupInfo(path, "pre-migration", int(match["from"]), int(match["to"]), size, created)
+        return BackupInfo(path, "pre-migration", int(match["from"]), int(match["to"]), size, created, logs_included=None)
     if match["manual_release"] is not None:
         return BackupInfo(path, "manual", None, None, size, created, release=match["manual_release"])
     return BackupInfo(
-        path, "pre-migration", None, None, size, created, from_release=match["from_release"], release=match["release"]
+        path, "pre-migration", None, None, size, created,
+        from_release=match["from_release"], release=match["release"], logs_included=match["settings"] is None,
     )
 
 
@@ -359,9 +362,12 @@ def manual_kind() -> str:
     return f"manual-{name_version()}"
 
 
-def upgrade_kind(from_release: str) -> str:
-    """The kind part of the name of the backup before an upgrade: `upgrade-<release line>-to-<this version>`."""
-    return f"upgrade-{name_version(from_release)}-to-{name_version()}"
+def upgrade_kind(from_release: str, without_logs: bool = False) -> str:
+    """
+    The kind part of the name of the backup before an upgrade: `upgrade-<release line>-to-<this version>`,
+    then `-settings` when it leaves the logs out, so the listing can say so without unpacking it.
+    """
+    return f"upgrade-{name_version(from_release)}-to-{name_version()}" + ("-settings" if without_logs else "")
 
 
 def archive_name(kind: str, now: datetime.datetime) -> str:

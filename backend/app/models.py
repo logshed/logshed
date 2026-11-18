@@ -1687,6 +1687,7 @@ class BackupItem(BaseModel):
     target_schema: Optional[int] = None
     from_release: Optional[str] = Field(None, description="The release upgraded from, as users read it (1.3.x); upgrade backups only.")
     release: Optional[str] = Field(None, description="The LogShed version that made it (1.4.0), or its release line (1.4.x) for an old name.")
+    logs_included: bool = Field(True, description="False for a backup made without the logs (settings, rules and history only).")
     size_bytes: int
     created_at: str
     expires_at: str

@@ -23,7 +23,7 @@ from app.api.deps import get_current_user, run_db_query
 from app.api.system import operation_conflict
 from app.core import backup as db_backup
 from app.core.config import get_db_path
-from app.core.migrations import schema_release_text
+from app.core.migrations import backup_leaves_out_logs, schema_release_text
 from app.models import BackupItem, BackupJobResponse, BackupListResponse, MessageResponse
 from app.services.operation_guard import OperationInProgressError, start_exclusive
 
@@ -102,6 +102,11 @@ def _item(info: db_backup.BackupInfo, now: datetime.datetime) -> BackupItem:
         # An old name carries schemas: read them as release lines
         from_release = schema_release_text(info.schema_version) if info.kind == "pre-migration" else None
         release = schema_release_text(info.target_schema or info.schema_version)
+    logs_included = info.logs_included
+    if logs_included is None:
+        # An old upgrade name: the steps it was made before decide, as they decided the backup
+        steps = list(range(info.schema_version + 1, (info.target_schema or info.schema_version) + 1))
+        logs_included = not (steps and backup_leaves_out_logs(steps))
     return BackupItem(
         filename=info.path.name,
         kind=info.kind,
@@ -109,6 +114,7 @@ def _item(info: db_backup.BackupInfo, now: datetime.datetime) -> BackupItem:
         target_schema=info.target_schema,
         from_release=from_release,
         release=release,
+        logs_included=logs_included,
         size_bytes=info.size_bytes,
         created_at=info.created_at.isoformat(),
         expires_at=info.expires_at.isoformat(),

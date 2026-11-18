@@ -891,6 +891,8 @@ export interface BackupItem {
   from_release?: string | null;
   /** The LogShed version that made it ("1.4.0"), or its release line ("1.4.x") for an old name. */
   release?: string | null;
+  /** False for a backup made without the logs (settings, rules and history only). */
+  logs_included: boolean;
   size_bytes: number;
   created_at: string;
   expires_at: string;

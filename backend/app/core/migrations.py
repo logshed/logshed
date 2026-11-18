@@ -986,10 +986,15 @@ def _backup_wanted(conn: sqlite3.Connection) -> bool:
     return resolve_backup_before_migration(stored)
 
 
+def backup_leaves_out_logs(pending: list[int]) -> bool:
+    """True when the backup before these steps leaves the logs out: every one of them allows it."""
+    return all(MIGRATION_NEEDS.get(v, MigrationNeeds()).backup_without_logs for v in pending)
+
+
 def backup_plan(db_path: Path, pending: list[int]) -> tuple[str, int]:
     """The backup method and the extra space the pending steps need (MIGRATION_NEEDS)."""
     needs = [MIGRATION_NEEDS.get(v, MigrationNeeds()) for v in pending]
-    without_logs = all(n.backup_without_logs for n in needs)
+    without_logs = backup_leaves_out_logs(pending)
     db_size = db_path.stat().st_size
     extra = sum(n.extra_space(db_size) for n in needs)
     return (db_backup.METHOD_WITHOUT_LOGS if without_logs else db_backup.METHOD_LOCKED_STREAM), extra
@@ -1016,7 +1021,10 @@ def _backup_before_migrations(
     try:
         return db_backup.create_backup(
             db_path,
-            kind=db_backup.upgrade_kind(schema_release(current_version) or str(current_version)),
+            kind=db_backup.upgrade_kind(
+                schema_release(current_version) or str(current_version),
+                without_logs=method == db_backup.METHOD_WITHOUT_LOGS,
+            ),
             schema_version=current_version,
             target_schema=target,
             method=method,
