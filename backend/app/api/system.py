@@ -15,6 +15,7 @@ from app.core import backup as db_backup
 from app.core import lifecycle
 from app.core.config import get_db_path, get_max_retention_days
 from app.core.loop_lag import get_loop_lag
+from app.core.migrations import schema_release_text
 from app.core.pipeline import get_dropped_count, get_ingest_rate, get_queue
 
 from app.models import (
@@ -46,6 +47,7 @@ from app.services.retention import (
 from app.services.storage_metrics import get_cached_storage_metrics
 from app.services.top_sources import get_top_sources
 from app.services.version_service import check_for_updates
+from app.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,8 @@ async def health_check(request: Request, response: Response) -> HealthResponse:
             total=snap.get("total"),
             from_schema=snap.get("from_schema") or 0,
             target_schema=snap.get("target_schema") or 0,
+            from_release=schema_release_text(snap.get("from_schema") or 0),
+            target_release=APP_VERSION,
             failed_at=snap.get("failed_at"),
         )
         state = "upgrading" if snap["status"] == lifecycle.UPGRADING else "migration_failed"

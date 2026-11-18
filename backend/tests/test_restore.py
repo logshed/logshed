@@ -101,6 +101,18 @@ def test_restore_puts_the_backup_in_place_and_keeps_the_old_database(db, capsys)
     assert f"kept in {folder}" in out and "Delete that folder once" in out
 
 
+def test_an_archive_named_with_the_version_restores(db, capsys):
+    _set(db, "marker", "in the backup")
+    archive = db_backup.create_backup(db, kind=db_backup.manual_kind(), schema_version=_schema(db)).path
+    assert archive.name.startswith(f"logshed-backup-manual-{db_backup.name_version()}-")
+    _set(db, "marker", "after the backup")
+
+    assert cli.restore_database(archive.name, str(db)) == 0
+
+    assert _get(db, "marker") == "in the backup"
+    assert f"Restored {archive.name}" in capsys.readouterr().out
+
+
 def test_restore_of_an_archive_from_the_next_schema_while_it_is_known(db, monkeypatch):
     monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(NEXT, lambda c: c.execute("CREATE TABLE next_marker (id INTEGER)"))])
     run_migrations(db, backup=False)
@@ -120,7 +132,9 @@ def test_an_older_schema_is_restored_and_upgraded_at_the_next_start(db, tmp_path
     archive = _backup(old, 2)
     assert cli.restore_database(str(archive), str(db)) == 0
     assert _schema(db) == 2
-    assert f"upgrades it to schema {LATEST} when it starts" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "It is a LogShed 1.2.x database (schema 2)" in out
+    assert "upgrades it when it starts" in out and "start the LogShed 1.2.x image instead" in out
 
 
 def test_a_newer_schema_is_refused(db, monkeypatch, capsys):
@@ -134,7 +148,7 @@ def test_a_newer_schema_is_refused(db, monkeypatch, capsys):
     assert cli.restore_database(str(archive), str(db)) == 1
 
     err = capsys.readouterr().err
-    assert f"schema {NEXT} database, made by a newer LogShed" in err and "Nothing was changed." in err
+    assert "made by a newer LogShed" in err and f"database schema {NEXT}" in err and "Nothing was changed." in err
     assert db.read_bytes() == before and _leftovers(db) == []
     assert not [p for p in db.parent.iterdir() if "before-restore" in p.name]
 

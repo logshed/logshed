@@ -615,6 +615,9 @@ class UpgradeStatus(BaseModel):
     total: Optional[int] = Field(None, description="Bytes to back up, or steps in all.")
     from_schema: int
     target_schema: int
+    # What users read instead of the schema numbers: "1.3.x" (null for a schema this release does not know), "1.4.0"
+    from_release: Optional[str] = None
+    target_release: Optional[str] = None
     failed_at: Optional[str] = None
 
 
@@ -1679,8 +1682,11 @@ class BackupItem(BaseModel):
     """One database backup archive in the backups folder."""
     filename: str
     kind: str = Field(description="pre-migration or manual")
-    schema_version: int
+    # Only names made before 1.4.0 was released carry schema numbers; newer names carry versions
+    schema_version: Optional[int] = None
     target_schema: Optional[int] = None
+    from_release: Optional[str] = Field(None, description="The release upgraded from, as users read it (1.3.x); upgrade backups only.")
+    release: Optional[str] = Field(None, description="The LogShed version that made it (1.4.0), or its release line (1.4.x) for an old name.")
     size_bytes: int
     created_at: str
     expires_at: str
@@ -1713,6 +1719,10 @@ class RecoveryResponse(BaseModel):
     from_schema: Optional[int] = None
     target_schema: Optional[int] = None
     current_schema: Optional[int] = None
+    # The schemas as users read them: "1.3.x" (null for a schema this release does not know), and the version upgraded to
+    from_release: Optional[str] = None
+    target_release: Optional[str] = None
+    current_release: Optional[str] = None
     failed_at: Optional[str] = None
     error: Optional[str] = None
     backup_filename: Optional[str] = None

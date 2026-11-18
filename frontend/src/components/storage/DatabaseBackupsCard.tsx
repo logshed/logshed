@@ -23,9 +23,11 @@ interface DatabaseBackupsCardProps {
 
 export function backupKindLabel(item: BackupItem): string {
   if (item.kind === 'pre-migration') {
-    return `Before upgrade (v${item.schema_version} to v${item.target_schema})`;
+    const from = item.from_release ?? `schema ${item.schema_version}`;
+    const to = item.release ?? `schema ${item.target_schema}`;
+    return `Before upgrade from ${from} to ${to}`;
   }
-  return `Manual (v${item.schema_version})`;
+  return `Manual, ${item.release ? `LogShed ${item.release}` : `schema ${item.schema_version}`}`;
 }
 
 export function expiryLabel(days: number): string {

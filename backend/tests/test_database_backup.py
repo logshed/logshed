@@ -143,7 +143,7 @@ def test_upgrade_from_v2_makes_one_full_archive(db, monkeypatch, caplog):
 
     archives = _archives(db)
     assert len(archives) == 1
-    assert db_backup.ARCHIVE_NAME_RE.match(archives[0].name)["kind"] == f"pre-v2-to-v{LATEST}"
+    assert db_backup.ARCHIVE_NAME_RE.match(archives[0].name)["kind"] == f"upgrade-1.2-to-{db_backup.name_version()}"
     assert archives[0].stat().st_mode & 0o777 == 0o640
     manifest, restored = _extract(archives[0], db.parent / "x")
     assert manifest["format"] == 1
@@ -163,7 +163,9 @@ def test_upgrade_from_v3_backs_up_once_before_all_steps(db, monkeypatch):
     _with_next_step(monkeypatch)
     run_migrations(db)
     archives = _archives(db)
-    assert [db_backup.ARCHIVE_NAME_RE.match(a.name)["kind"] for a in archives] == [f"pre-v{LATEST}-to-v{NEXT}"]
+    assert [db_backup.ARCHIVE_NAME_RE.match(a.name)["kind"] for a in archives] == [
+        f"upgrade-{migrations_mod.SCHEMA_RELEASES[LATEST]}-to-{db_backup.name_version()}"
+    ]
     _, restored = _extract(archives[0], db.parent / "x")
     assert _schema_version(restored) == LATEST
     assert _counts(restored)["logs"] == 10
@@ -375,7 +377,7 @@ def test_backup_command_while_another_connection_inserts(db, monkeypatch, roomy_
     (archive,) = _archives(db)
     assert f"Backup written: {archive}" in out
     assert "Deleted automatically after" in out
-    assert db_backup.ARCHIVE_NAME_RE.match(archive.name)["kind"] == f"manual-v{LATEST}"
+    assert db_backup.ARCHIVE_NAME_RE.match(archive.name)["kind"] == f"manual-{db_backup.name_version()}"
     manifest, restored = _extract(archive, db.parent / "x")
     assert manifest["kind"] == "manual" and manifest["target_schema"] is None
     assert _integrity(restored) == "ok"
@@ -445,6 +447,56 @@ def test_expiry_deletes_only_matching_names_older_than_30_days(tmp_path):
         _touch(path, 60 * 86400, now)  # the name's time decides, not the file's
     assert db_backup.prune_backups(folder, now=now) == (1, 0)
     assert sorted(p.name for p in folder.iterdir()) == sorted([young.name, foreign.name])
+
+
+def test_expiry_covers_old_and_new_names(tmp_path):
+    folder = tmp_path / "backups"
+    folder.mkdir()
+    now = datetime.datetime(2026, 12, 19, 12, 0, tzinfo=datetime.timezone.utc).timestamp()
+    expired = [
+        "logshed-backup-pre-v3-to-v4-20261118T093900Z.tar.gz",
+        "logshed-backup-manual-v4-20261118T100000Z-2.tar.gz",
+        "logshed-backup-upgrade-1.3-to-1.4.0-beta.1-20261119T080000Z.tar.gz",
+        "logshed-backup-manual-1.4.0-20261119T080000Z-3.tar.gz",
+    ]
+    kept = ["logshed-backup-manual-1.4.0-20261120T080000Z.tar.gz", "logshed-backup-upgrade-1.3-to-1.4.0-20261120T080000Z.tar.gz"]
+    for name in expired + kept:
+        _touch(folder / name, 0, now)
+    assert db_backup.prune_backups(folder, now=now) == (4, 0)
+    assert sorted(p.name for p in folder.iterdir()) == sorted(kept)
+
+
+@pytest.mark.parametrize(
+    "version,in_name",
+    [
+        ("1.4.0", "1.4.0"),
+        ("1.4.0-beta.1", "1.4.0-beta.1"),
+        ("1.4.0-dev", "1.4.0-dev"),
+        ("v1.4.1", "1.4.1"),
+        ("1.4.0+build.7", "1.4.0-build.7"),
+        ("dev", "dev"),
+        ("--", "unknown"),
+    ],
+)
+def test_every_version_gives_a_name_the_folder_reads_back(tmp_path, monkeypatch, version, in_name):
+    monkeypatch.setattr(db_backup, "APP_VERSION", version)
+    now = datetime.datetime(2026, 11, 20, 8, 0, tzinfo=datetime.timezone.utc)
+    folder = tmp_path / "backups"
+    folder.mkdir()
+    for kind in (db_backup.manual_kind(), db_backup.manual_kind(), db_backup.upgrade_kind("1.3")):
+        (folder / db_backup._free_name(folder, kind, now)).write_bytes(b"x")
+    found = sorted((b.path.name, b.kind, b.from_release, b.release) for b in db_backup.list_backups(folder))
+    assert found == sorted([
+        (f"logshed-backup-manual-{in_name}-20261120T080000Z.tar.gz", "manual", None, in_name),
+        (f"logshed-backup-manual-{in_name}-20261120T080000Z-2.tar.gz", "manual", None, in_name),
+        (f"logshed-backup-upgrade-1.3-to-{in_name}-20261120T080000Z.tar.gz", "pre-migration", "1.3", in_name),
+    ])
+
+
+def test_every_schema_has_a_release():
+    assert sorted(migrations_mod.SCHEMA_RELEASES) == [v for v, _ in MIGRATIONS]
+    assert migrations_mod.release_label(3) == "LogShed 1.3.x"
+    assert migrations_mod.release_label(99) == "schema 99"
 
 
 def test_expiry_keeps_a_recent_tmp_file_and_deletes_a_stale_one(tmp_path):

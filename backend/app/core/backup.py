@@ -68,8 +68,16 @@ FLOOR_FRACTION = 0.10
 # Tables a backup without logs leaves empty (their schema is kept, so an older release still starts).
 LOG_TABLES = ("logs", "logs_fts")
 
+# A LogShed version in an archive name (name_version): the shortest that fits, so a pre-release's
+# "-beta.1" is part of it but the "-settings" and the time after it are not.
+_NAME_VERSION = r"[0-9A-Za-z][0-9A-Za-z.]*(?:-[0-9A-Za-z.]+)*?"
 ARCHIVE_NAME_RE = re.compile(
-    r"^logshed-backup-(?P<kind>pre-v(?P<from>\d+)-to-v(?P<to>\d+)|manual-v(?P<schema>\d+))"
+    r"^logshed-backup-(?P<kind>"
+    # Names from 1.4.0's previews carried schema numbers; they still list, download, expire and restore.
+    # They come first, so "manual-v4" never reads as a version "v4".
+    r"pre-v(?P<from>\d+)-to-v(?P<to>\d+)|manual-v(?P<schema>\d+)"
+    r"|upgrade-(?P<from_release>[0-9A-Za-z.]+)-to-(?P<release>" + _NAME_VERSION + r")"
+    r"|manual-(?P<manual_release>" + _NAME_VERSION + r"))"
     r"-(?P<stamp>\d{8}T\d{6}Z)(?:-(?P<n>\d+))?\.tar\.gz$"
 )
 _STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
@@ -117,10 +125,14 @@ class BackupInfo:
 
     path: Path
     kind: str
-    schema_version: int
+    # Old names carry schema numbers, new ones LogShed versions (the release line upgraded from, and
+    # the version that made it); the API fills in the other from migrations.SCHEMA_RELEASES.
+    schema_version: Optional[int]
     target_schema: Optional[int]
     size_bytes: int
     created_at: datetime.datetime
+    from_release: Optional[str] = None
+    release: Optional[str] = None
 
     @property
     def expires_at(self) -> datetime.datetime:
@@ -164,6 +176,18 @@ def archive_created_at(path: Path) -> datetime.datetime:
     return datetime.datetime.fromtimestamp(path.stat().st_mtime, datetime.timezone.utc)
 
 
+def _info_from_name(match: re.Match, path: Path, size: int, created: datetime.datetime) -> BackupInfo:
+    if match["schema"] is not None:
+        return BackupInfo(path, "manual", int(match["schema"]), None, size, created)
+    if match["from"] is not None:
+        return BackupInfo(path, "pre-migration", int(match["from"]), int(match["to"]), size, created)
+    if match["manual_release"] is not None:
+        return BackupInfo(path, "manual", None, None, size, created, release=match["manual_release"])
+    return BackupInfo(
+        path, "pre-migration", None, None, size, created, from_release=match["from_release"], release=match["release"]
+    )
+
+
 def list_backups(folder: Path) -> list[BackupInfo]:
     """The archives in the folder whose names match the archive pattern, newest first."""
     found = []
@@ -180,11 +204,7 @@ def list_backups(folder: Path) -> list[BackupInfo]:
             created = archive_created_at(entry)
         except OSError:
             continue
-        if match["schema"] is not None:
-            kind, schema, target = "manual", int(match["schema"]), None
-        else:
-            kind, schema, target = "pre-migration", int(match["from"]), int(match["to"])
-        found.append(BackupInfo(entry, kind, schema, target, size, created))
+        found.append(_info_from_name(match, entry, size, created))
     found.sort(key=lambda b: (b.created_at, b.path.name), reverse=True)
     return found
 
@@ -320,6 +340,28 @@ def _ensure_dir(folder: Path, owner: Optional[tuple[int, int]]) -> None:
     # Set the mode outright: `docker exec` runs with umask 0, which would leave the folder writable by anyone.
     os.chmod(folder, 0o750)
     _give_to(folder, owner)
+
+
+def name_version(version: Optional[str] = None) -> str:
+    """A LogShed version (this one by default) as it goes into an archive name: letters, digits, dots and single hyphens."""
+    version = APP_VERSION if version is None else version
+    cleaned = re.sub(r"[^0-9A-Za-z.]+", "-", version.strip().lstrip("vV")).strip("-.")
+    return cleaned or "unknown"
+
+
+def release_text(release: str) -> str:
+    """A release line ("1.3") as users read it ("1.3.x"); an exact version stays as it is."""
+    return f"{release}.x" if re.fullmatch(r"\d+\.\d+", release) else release
+
+
+def manual_kind() -> str:
+    """The kind part of a manual backup's name: `manual-<this version>`."""
+    return f"manual-{name_version()}"
+
+
+def upgrade_kind(from_release: str) -> str:
+    """The kind part of the name of the backup before an upgrade: `upgrade-<release line>-to-<this version>`."""
+    return f"upgrade-{name_version(from_release)}-to-{name_version()}"
 
 
 def archive_name(kind: str, now: datetime.datetime) -> str:
@@ -699,7 +741,7 @@ def create_backup(
     while logging carries on (_day_file_copy); the database is then copied by VACUUM INTO (or without
     logs) even when `method` is the locked stream, so its catalogue can be made to match them.
 
-    `kind` is `pre-v<from>-to-v<to>` or `manual-v<schema>`. `extra_space` is space the caller needs
+    `kind` is `upgrade_kind(...)` or `manual_kind()`. `extra_space` is space the caller needs
     afterwards (a migration's own needs), kept out of what the backup may use. Expired archives and
     stale temporary files are deleted first; no other archive is deleted to make room.
     `progress_cb(done, total)` gets the bytes compressed so far (a VACUUM INTO copy comes before the

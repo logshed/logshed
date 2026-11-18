@@ -23,6 +23,7 @@ from app.api.deps import get_current_user, run_db_query
 from app.api.system import operation_conflict
 from app.core import backup as db_backup
 from app.core.config import get_db_path
+from app.core.migrations import schema_release_text
 from app.models import BackupItem, BackupJobResponse, BackupListResponse, MessageResponse
 from app.services.operation_guard import OperationInProgressError, start_exclusive
 
@@ -94,11 +95,20 @@ async def stop_backup_job(timeout: float = 10.0) -> None:
 
 def _item(info: db_backup.BackupInfo, now: datetime.datetime) -> BackupItem:
     left = (info.expires_at - now).total_seconds()
+    if info.schema_version is None:
+        from_release = db_backup.release_text(info.from_release) if info.from_release else None
+        release = db_backup.release_text(info.release) if info.release else None
+    else:
+        # An old name carries schemas: read them as release lines
+        from_release = schema_release_text(info.schema_version) if info.kind == "pre-migration" else None
+        release = schema_release_text(info.target_schema or info.schema_version)
     return BackupItem(
         filename=info.path.name,
         kind=info.kind,
         schema_version=info.schema_version,
         target_schema=info.target_schema,
+        from_release=from_release,
+        release=release,
         size_bytes=info.size_bytes,
         created_at=info.created_at.isoformat(),
         expires_at=info.expires_at.isoformat(),
@@ -154,7 +164,7 @@ async def create_backup_now(user: dict = Depends(get_current_user)) -> BackupJob
             result = await asyncio.to_thread(
                 db_backup.create_backup,
                 db_path,
-                kind=f"manual-v{schema}",
+                kind=db_backup.manual_kind(),
                 schema_version=schema,
                 method=db_backup.METHOD_VACUUM_INTO,
                 progress_cb=_progress,

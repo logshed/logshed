@@ -10,16 +10,19 @@ const PRE: BackupItem = {
   kind: 'pre-migration',
   schema_version: 3,
   target_schema: 4,
+  from_release: '1.3.x',
+  release: '1.4.x',
   size_bytes: 300 * 1024 * 1024,
   created_at: '2026-11-13T08:00:00+00:00',
   expires_at: '2026-12-13T08:00:00+00:00',
   days_until_expiry: 30,
 };
 const MANUAL: BackupItem = {
-  filename: 'logshed-backup-manual-v4-20261101T120000Z.tar.gz',
+  filename: 'logshed-backup-manual-1.4.0-20261101T120000Z.tar.gz',
   kind: 'manual',
-  schema_version: 4,
+  schema_version: null,
   target_schema: null,
+  release: '1.4.0',
   size_bytes: 10 * 1024 * 1024,
   created_at: '2026-11-01T12:00:00+00:00',
   expires_at: '2026-12-01T12:00:00+00:00',
@@ -65,9 +68,9 @@ describe('DatabaseBackupsCard', () => {
     const list = screen.getByRole('list', { name: 'Database backups' });
     const rows = within(list).getAllByRole('listitem');
     expect(rows).toHaveLength(2);
-    expect(within(rows[0]).getByText('Before upgrade (v3 to v4)')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Before upgrade from 1.3.x to 1.4.x')).toBeInTheDocument();
     expect(within(rows[0]).getByText(/2026-11-13 08:00, 300 MB, expires in 30 days/)).toBeInTheDocument();
-    expect(within(rows[1]).getByText('Manual (v4)')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Manual, LogShed 1.4.0')).toBeInTheDocument();
     expect(within(rows[1]).getByText(/expires in 1 day$/)).toBeInTheDocument();
     const link = within(rows[0]).getByRole('link', { name: `Download ${PRE.filename}` });
     expect(link).toHaveAttribute('href', `/api/system/backups/${PRE.filename}/download`);
@@ -98,7 +101,7 @@ describe('DatabaseBackupsCard', () => {
 
   it('creates a backup, shows its progress and lists it when done', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const fresh = { ...MANUAL, filename: 'logshed-backup-manual-v4-20261113T090000Z.tar.gz', days_until_expiry: 30 };
+    const fresh = { ...MANUAL, filename: 'logshed-backup-manual-1.4.0-20261113T090000Z.tar.gz', days_until_expiry: 30 };
     const create = vi.spyOn(backupsApi, 'createBackup').mockResolvedValue({ state: 'running', stage: 'copying', done: 0, total: 0 });
     const job = vi.spyOn(backupsApi, 'fetchBackupJob');
     const { onChanged } = renderCard();
@@ -169,8 +172,15 @@ describe('DatabaseBackupsCard', () => {
   });
 
   it('words kinds and expiry', () => {
-    expect(backupKindLabel(PRE)).toBe('Before upgrade (v3 to v4)');
-    expect(backupKindLabel(MANUAL)).toBe('Manual (v4)');
+    expect(backupKindLabel(PRE)).toBe('Before upgrade from 1.3.x to 1.4.x');
+    expect(backupKindLabel(MANUAL)).toBe('Manual, LogShed 1.4.0');
+    const newUpgrade = { ...PRE, schema_version: null, target_schema: null, from_release: '1.3.x', release: '1.4.0-beta.1' };
+    expect(backupKindLabel(newUpgrade)).toBe('Before upgrade from 1.3.x to 1.4.0-beta.1');
+    // A schema the server names no release for keeps its number
+    expect(backupKindLabel({ ...PRE, schema_version: 9, target_schema: 10, from_release: null, release: null })).toBe(
+      'Before upgrade from schema 9 to schema 10'
+    );
+    expect(backupKindLabel({ ...MANUAL, schema_version: 9, release: null })).toBe('Manual, schema 9');
     expect(expiryLabel(0)).toBe('Expires today');
     expect(expiryLabel(1)).toBe('Expires in 1 day');
     expect(expiryLabel(12)).toBe('Expires in 12 days');

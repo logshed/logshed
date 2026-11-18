@@ -10,7 +10,7 @@ import { Card, CardHeader } from '../common/Card.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { LoginForm } from '../auth/LoginForm.tsx';
 import { LogShedLogo } from '../common/LogShedLogo.tsx';
-import { upgradeProgressText } from './upgradeProgress.ts';
+import { releaseLabel, upgradeProgressText } from './upgradeProgress.ts';
 
 /** How often the screen asks how a retried upgrade is going. */
 export const HEALTH_POLL_MS = 2000;
@@ -90,7 +90,13 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
       setDetails(null);
       setHealth({
         status: 'upgrading',
-        upgrade: { stage: skipBackup ? 'migrate' : 'backup', from_schema: details?.current_schema ?? 0, target_schema: details?.target_schema ?? 0 },
+        upgrade: {
+          stage: skipBackup ? 'migrate' : 'backup',
+          from_schema: details?.current_schema ?? 0,
+          target_schema: details?.target_schema ?? 0,
+          from_release: details?.current_release,
+          target_release: details?.target_release,
+        },
       });
     } catch (err: any) {
       setErrorMsg(err.message || 'Could not start the upgrade.');
@@ -127,9 +133,10 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
           <div className="p-3 bg-warning-950/40 border border-warning-800/60 rounded-lg flex items-start gap-2 text-xs text-warning-300">
             <AlertTriangle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
             <span>
-              LogShed could not upgrade its database from schema {health.upgrade?.from_schema} to{' '}
-              {health.upgrade?.target_schema}. {stoppedSentence(stage)} Sign in to see what went wrong and what you can
-              do. Logs are not being received until then.
+              LogShed could not upgrade its database from{' '}
+              {releaseLabel(health.upgrade?.from_release, health.upgrade?.from_schema)} to{' '}
+              {releaseLabel(health.upgrade?.target_release, health.upgrade?.target_schema)}. {stoppedSentence(stage)} Sign
+              in to see what went wrong and what you can do. Logs are not being received until then.
             </span>
           </div>
         }
@@ -152,14 +159,14 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
         {d ? (
           <div className="space-y-3 text-xs text-fg-soft">
             <p className="text-sm text-fg">
-              LogShed {d.app_version} could not upgrade the database from schema {d.from_schema} to {d.target_schema}
+              LogShed {d.app_version} could not upgrade the database from {releaseLabel(d.from_release, d.from_schema)}
               {failedAt && <> ({failedAt})</>}. {stoppedSentence(d.stage)}
             </p>
             <p>
               <strong className="text-fg">
                 {moved
-                  ? `Your database is now at schema ${d.current_schema}: the steps up to it finished, and the next one was rolled back.`
-                  : `Your database is unchanged at schema ${d.current_schema}.`}
+                  ? `Your database now matches ${releaseLabel(d.current_release, d.current_schema)}: the steps up to it finished, and the next one was rolled back.`
+                  : `Your database is unchanged: ${releaseLabel(d.current_release, d.current_schema)} can still run on it.`}
               </strong>{' '}
               LogShed is not receiving or storing logs until you retry the upgrade or go back to the version you ran before.
             </p>
@@ -233,8 +240,8 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
             <p className="text-fg font-medium">Or go back to the version you ran before</p>
             <p className="text-fg-muted">
               {moved
-                ? `The version you ran before cannot run on schema ${d?.current_schema}. Stop the container, restore the backup made before this upgrade with the restore command ("Restoring a backup" in the configuration guide), then start the version you ran before.`
-                : `Set the container's image tag to the version you ran before this upgrade and start it again. That works while the database is still at schema ${d?.current_schema ?? health.upgrade?.from_schema}, as it is now. See "Going back to an older version" in the configuration guide.`}
+                ? `The version you ran before cannot run on the database now. Stop the container, restore the backup made before this upgrade with the restore command ("Restoring a backup" in the configuration guide), then start the version you ran before.`
+                : `Set the container's image tag to the version you ran before this upgrade (${releaseLabel(d?.current_release ?? health.upgrade?.from_release, d?.current_schema ?? health.upgrade?.from_schema)}) and start it again. That works while the database is unchanged, as it is now. See "Going back to an older version" in the configuration guide.`}
             </p>
           </div>
         </div>

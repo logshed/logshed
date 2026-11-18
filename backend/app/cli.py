@@ -204,7 +204,7 @@ def backup_database(db_path: str | None = None) -> int:
         schema = get_user_version(conn)
     try:
         result = db_backup.create_backup(
-            path, kind=f"manual-v{schema}", schema_version=schema, method=db_backup.METHOD_VACUUM_INTO, day_files=True
+            path, kind=db_backup.manual_kind(), schema_version=schema, method=db_backup.METHOD_VACUUM_INTO, day_files=True
         )
     except db_backup.BackupSpaceError as e:
         print(
@@ -232,7 +232,8 @@ def restore_database(archive: str, db_path: str | None = None) -> int:
     from app.core import backup as db_backup
     from app.core import restore
     from app.core.config import get_db_path
-    from app.core.migrations import MIGRATIONS
+    from app.core.migrations import MIGRATIONS, release_label
+    from app.version import APP_VERSION
 
     path = Path(db_path) if db_path else get_db_path()
     latest = MIGRATIONS[-1][0]
@@ -251,7 +252,10 @@ def restore_database(archive: str, db_path: str | None = None) -> int:
     finally:
         signal.signal(signal.SIGTERM, previous)
     print(f"Restored {result.archive.name} into {path}.")
-    print(f"It is a schema {result.schema_version} database, backed up by LogShed {result.app_version}.")
+    print(
+        f"It is a {release_label(result.schema_version)} database (schema {result.schema_version}), "
+        f"backed up by LogShed {result.app_version}."
+    )
     if result.omitted_tables:
         print(
             "This backup was made without the logs (before an upgrade that does not change them): it brings back "
@@ -269,8 +273,8 @@ def restore_database(archive: str, db_path: str | None = None) -> int:
         print("The failed upgrade's marker (.migration_failed) was removed: the next start runs the upgrade again.")
     if result.schema_version < latest:
         print(
-            f"This image upgrades it to schema {latest} when it starts (backing it up first). To run it as it is, "
-            "start the LogShed version it came from instead."
+            f"This image (LogShed {APP_VERSION}) upgrades it when it starts, backing it up first. To run it as it is, "
+            f"start the {release_label(result.schema_version)} image instead."
         )
     print("Start LogShed now. Keep .secret_key as it is: stored passwords and keys are read with it.")
     return 0

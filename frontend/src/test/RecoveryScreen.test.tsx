@@ -11,7 +11,7 @@ import { HealthResponse, RecoveryDetails } from '../types.ts';
 
 const FAILED: HealthResponse = {
   status: 'migration_failed',
-  upgrade: { stage: 'migration', from_schema: 3, target_schema: 4, failed_at: '2026-11-13T08:00:00+00:00' },
+  upgrade: { stage: 'migration', from_schema: 3, target_schema: 4, from_release: '1.3.x', target_release: '1.4.0', failed_at: '2026-11-13T08:00:00+00:00' },
 };
 const DETAILS: RecoveryDetails = {
   status: 'recovery',
@@ -20,6 +20,9 @@ const DETAILS: RecoveryDetails = {
   from_schema: 3,
   target_schema: 4,
   current_schema: 3,
+  from_release: '1.3.x',
+  target_release: '1.4.0',
+  current_release: '1.3.x',
   failed_at: '2026-11-13T08:00:00+00:00',
   error: 'UNIQUE constraint failed: saved_views.name',
   backup_filename: 'logshed-backup-pre-v3-to-v4-20261113T075900Z.tar.gz',
@@ -75,7 +78,7 @@ describe('StartupGate and RecoveryScreen', () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(FAILED);
     vi.spyOn(authApi, 'getAuthStatus').mockResolvedValue({ authenticated: false, setup_required: false });
     renderGate();
-    expect(await screen.findByText(/could not upgrade its database from schema 3 to\s+4/)).toBeInTheDocument();
+    expect(await screen.findByText(/could not upgrade its database from\s+LogShed 1.3.x to\s+LogShed 1.4.0\./)).toBeInTheDocument();
     expect(screen.getByText(/A step of the upgrade failed and was rolled back/)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.queryByText('The app')).not.toBeInTheDocument();
@@ -86,8 +89,10 @@ describe('StartupGate and RecoveryScreen', () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(FAILED);
     renderGate();
     expect(await screen.findByText(DETAILS.error!)).toBeInTheDocument();
-    expect(screen.getByText(/could not upgrade the database from schema 3 to 4/)).toHaveTextContent('(2026-11-13 08:00:00)');
-    expect(screen.getByText('Your database is unchanged at schema 3.')).toBeInTheDocument();
+    expect(screen.getByText(/could not upgrade the database from LogShed 1.3.x/)).toHaveTextContent('(2026-11-13 08:00:00)');
+    expect(screen.getByText('Your database is unchanged: LogShed 1.3.x can still run on it.')).toBeInTheDocument();
+    expect(screen.getByText(/the version you ran before this upgrade \(LogShed 1.3.x\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/schema/)).not.toBeInTheDocument();
     expect(screen.getByText(/Disk: 40 GB free of 100 GB/)).toHaveTextContent('A backup needs about 600 MB and must leave 10 GB free.');
     expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
       'href',
@@ -107,11 +112,14 @@ describe('StartupGate and RecoveryScreen', () => {
     await waitFor(() => expect(retry).toHaveBeenCalledWith(false));
     expect(await screen.findByRole('heading', { name: 'LogShed is upgrading its database' })).toBeInTheDocument();
 
-    health.mockResolvedValueOnce({ status: 'upgrading', upgrade: { stage: 'migrate', done: 0, total: 1, from_schema: 3, target_schema: 4 } });
+    health.mockResolvedValueOnce({
+      status: 'upgrading',
+      upgrade: { stage: 'migrate', done: 0, total: 1, from_schema: 3, target_schema: 4, from_release: '1.3.x', target_release: '1.4.0' },
+    });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(HEALTH_POLL_MS);
     });
-    expect(screen.getByText('Upgrading the database from schema 3 to 4 (step 1 of 1)')).toBeInTheDocument();
+    expect(screen.getByText('Upgrading the database from LogShed 1.3.x to LogShed 1.4.0 (step 1 of 1)')).toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
 
     health.mockResolvedValueOnce({ status: 'ok' });
@@ -171,21 +179,21 @@ describe('StartupGate and RecoveryScreen', () => {
   });
 
   it('says when a run across several schemas stopped part way, and that going back needs the backup', async () => {
-    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({ ...FAILED, upgrade: { ...FAILED.upgrade!, from_schema: 2 } });
-    vi.spyOn(backupsApi, 'fetchRecovery').mockResolvedValue({ ...DETAILS, from_schema: 2, current_schema: 3 });
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({ ...FAILED, upgrade: { ...FAILED.upgrade!, from_schema: 2, from_release: '1.2.x' } });
+    vi.spyOn(backupsApi, 'fetchRecovery').mockResolvedValue({ ...DETAILS, from_schema: 2, from_release: '1.2.x', current_schema: 3 });
     renderGate();
-    expect(await screen.findByText(/Your database is now at schema 3: the steps up to it finished/)).toBeInTheDocument();
+    expect(await screen.findByText(/Your database now matches LogShed 1.3.x: the steps up to it finished/)).toBeInTheDocument();
     expect(screen.queryByText(/unchanged/)).not.toBeInTheDocument();
-    expect(screen.getByText(/The version you ran before cannot run on schema 3/)).toHaveTextContent('restore the backup made before this upgrade');
+    expect(screen.getByText(/The version you ran before cannot run on the database now/)).toHaveTextContent('restore the backup made before this upgrade');
     expect(screen.getByText(/Runs the upgrade again, backing up the database first/)).toBeInTheDocument();
   });
 
   it('follows the upgrade when another tab already retried it', async () => {
     const health = vi.spyOn(systemApi, 'fetchHealth').mockResolvedValueOnce(FAILED);
-    health.mockResolvedValue({ status: 'upgrading', upgrade: { stage: 'migrate', done: 0, total: 1, from_schema: 3, target_schema: 4 } });
+    health.mockResolvedValue({ status: 'upgrading', upgrade: { stage: 'migrate', done: 0, total: 1, from_schema: 3, target_schema: 4, from_release: '1.3.x', target_release: '1.4.0' } });
     vi.spyOn(backupsApi, 'fetchRecovery').mockResolvedValue({ status: 'upgrading', backup_available: false });
     renderGate();
-    expect(await screen.findByText('Upgrading the database from schema 3 to 4 (step 1 of 1)')).toBeInTheDocument();
+    expect(await screen.findByText('Upgrading the database from LogShed 1.3.x to LogShed 1.4.0 (step 1 of 1)')).toBeInTheDocument();
     expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
   });
 
@@ -195,5 +203,7 @@ describe('StartupGate and RecoveryScreen', () => {
     );
     expect(upgradeProgressText({ stage: 'backup', from_schema: 2, target_schema: 3 })).toBe('Backing up the database');
     expect(upgradeProgressText({ stage: 'starting', from_schema: 2, target_schema: 3 })).toBe('Starting LogShed');
+    // A server that names no release keeps the schema numbers
+    expect(upgradeProgressText({ stage: 'migrate', from_schema: 2, target_schema: 3 })).toBe('Upgrading the database from schema 2 to schema 3');
   });
 });

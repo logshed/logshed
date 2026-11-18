@@ -136,7 +136,7 @@ async def test_upgrade_serves_the_status_page_and_503_until_ready(env, monkeypat
         page = await client.get("/storage", headers={"Accept": "text/html"})
         assert page.status_code == 503
         assert "LogShed is upgrading its database" in page.text
-        assert f"from schema {LATEST} to {NEXT}" in page.text and "Do not restart" in page.text
+        assert f"from LogShed 1.4.x to LogShed {APP_VERSION}" in page.text and "Do not restart" in page.text
         assert '<meta http-equiv="refresh" content="3">' in page.text
         assert "<script" not in page.text
         assert page.headers["Retry-After"] == "5" and page.headers["Cache-Control"] == "no-store"
@@ -159,7 +159,7 @@ async def test_upgrade_serves_the_status_page_and_503_until_ready(env, monkeypat
         env.started.assert_awaited_once()
         assert (await client.get("/api/health")).json()["status"] == "ok"
     assert _schema(env.db) == NEXT
-    assert [n.startswith(f"logshed-backup-pre-v{LATEST}-to-v{NEXT}-") for n in _archives(env.folder)] == [True]
+    assert [n.startswith(f"logshed-backup-upgrade-1.4-to-{db_backup.name_version()}-") for n in _archives(env.folder)] == [True]
 
 
 async def test_status_page_shows_backup_progress():
@@ -188,11 +188,13 @@ async def test_failed_step_enters_recovery_with_marker_and_one_notification(env,
         env.send.assert_awaited_once()
         title, body = env.send.await_args.args[:2]
         assert title == "LogShed upgrade stopped"
-        assert f"from schema {LATEST} to {NEXT}" in body and f"unchanged at schema {LATEST}" in body
+        assert "upgrade the database of LogShed 1.4.x" in body and "unchanged, so the version you ran before (LogShed 1.4.x)" in body
 
         # Anyone sees the state, never the error
         health = (await client.get("/api/health")).json()
         assert health["status"] == "migration_failed" and health["upgrade"]["stage"] == "migration"
+        # The schemas as users read them
+        assert (health["upgrade"]["from_release"], health["upgrade"]["target_release"]) == ("1.4.x", APP_VERSION)
         assert "failed on purpose" not in json.dumps(health)
         assert (await client.get("/api/logs")).status_code == 503
         assert (await client.get("/api/auth/status")).status_code == 200
@@ -202,6 +204,7 @@ async def test_failed_step_enters_recovery_with_marker_and_one_notification(env,
         _signed_in(client)
         details = (await client.get("/api/system/recovery")).json()
         assert details["status"] == "recovery" and "failed on purpose" in details["error"]
+        assert (details["from_release"], details["current_release"], details["target_release"]) == ("1.4.x", "1.4.x", APP_VERSION)
         assert details["backup_available"] is True and details["backup_filename"] == archives[0]
         assert details["disk_free_bytes"] == 90 * GiB and details["database_size_bytes"] > 0
         download = await client.get(f"/api/system/backups/{archives[0]}/download")
@@ -280,11 +283,11 @@ async def test_retry_backs_up_again_when_the_failed_run_moved_the_schema(env, tm
         assert (await client.post("/api/system/recovery/retry", headers=CSRF)).status_code == 200
         await _wait_for(lifecycle.is_ready)
     title, body = env.send.await_args.args[:2]
-    assert f"now at schema {LATEST}" in body and "restore the backup" in body and "unchanged" not in body
+    assert "now matches LogShed 1.4.x" in body and "restore the backup" in body and "unchanged" not in body
     names = _archives(env.folder)
     assert len(names) == 2
-    assert any(n.startswith(f"logshed-backup-pre-v2-to-v{NEXT}-") for n in names)
-    assert any(n.startswith(f"logshed-backup-pre-v{LATEST}-to-v{NEXT}-") for n in names)
+    assert any(n.startswith(f"logshed-backup-upgrade-1.2-to-{db_backup.name_version()}-") for n in names)
+    assert any(n.startswith(f"logshed-backup-upgrade-1.4-to-{db_backup.name_version()}-") for n in names)
     assert _schema(env.db) == NEXT
 
 

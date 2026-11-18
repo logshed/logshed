@@ -196,6 +196,9 @@ export interface UpgradeStatus {
   total?: number | null;
   from_schema: number;
   target_schema: number;
+  /** The schemas as users read them: the release upgraded from ("1.3.x", null for a schema the server does not know) and to ("1.4.0"). */
+  from_release?: string | null;
+  target_release?: string | null;
   failed_at?: string | null;
 }
 
@@ -881,8 +884,13 @@ export interface DockerEndpointTestResult {
 export interface BackupItem {
   filename: string;
   kind: 'pre-migration' | 'manual';
-  schema_version: number;
+  /** Only names made before 1.4.0 was released carry schema numbers. */
+  schema_version?: number | null;
   target_schema?: number | null;
+  /** The release upgraded from ("1.3.x"), upgrade backups only. */
+  from_release?: string | null;
+  /** The LogShed version that made it ("1.4.0"), or its release line ("1.4.x") for an old name. */
+  release?: string | null;
   size_bytes: number;
   created_at: string;
   expires_at: string;
@@ -915,6 +923,10 @@ export interface RecoveryDetails {
   from_schema?: number | null;
   target_schema?: number | null;
   current_schema?: number | null;
+  /** The schemas as users read them ("1.3.x"; null for one the server does not know), and the version upgraded to. */
+  from_release?: string | null;
+  target_release?: string | null;
+  current_release?: string | null;
   failed_at?: string | null;
   error?: string | null;
   backup_filename?: string | null;

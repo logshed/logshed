@@ -26,6 +26,7 @@ from typing import Callable, Optional
 from app.core import backup as db_backup
 from app.core import day_files, instance_lock, lifecycle
 from app.core.session_epoch import bump_session_epoch, read_session_epoch
+from app.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -168,8 +169,8 @@ def _check_manifest(manifest: dict, db_name: str, extracted: Path, latest_schema
         raise RestoreError("The archive's manifest has no schema version.")
     if schema > latest_schema:
         raise RestoreError(
-            f"The backup is of a schema {schema} database, made by a newer LogShed ({manifest.get('app_version')}); "
-            f"this image understands schema {latest_schema} at most. Restore it with that version's image."
+            f"The backup was made by a newer LogShed ({manifest.get('app_version')}, database schema {schema}) than "
+            f"this image (LogShed {APP_VERSION}, schema {latest_schema} at most) can run. Restore it with that version's image."
         )
     return entry
 

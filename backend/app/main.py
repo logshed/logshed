@@ -72,6 +72,7 @@ from app.core.migrations import (
     MigrationBackupError,
     MigrationCancelled,
     MigrationRun,
+    release_label,
     run_migrations,
 )
 from app.core.pipeline import KeyedMultilineAssembler, QueueConsumer, InternalLogHandler
@@ -717,10 +718,10 @@ def recovery_state_sentence(marker: dict) -> str:
     """Where the database is after a failed upgrade, and the way back from there."""
     current, start = marker.get("current_schema"), marker.get("from_schema")
     if current == start:
-        return f"The database is unchanged at schema {current}, so the version you ran before can still run on it."
+        return f"The database is unchanged, so the version you ran before ({release_label(current)}) can still run on it."
     return (
-        f"The database is now at schema {current}: the steps up to it finished, and the next one was rolled back. "
-        "The version you ran before cannot run on it; to go back, restore the backup made before the upgrade."
+        f"The database now matches {release_label(current)}: the steps up to it finished, and the next one was rolled "
+        "back. The version you ran before cannot run on it; to go back, restore the backup made before the upgrade."
     )
 
 
@@ -731,8 +732,8 @@ async def _notify_recovery(marker: dict) -> None:
     stage = "the backup before it" if marker.get("stage") == "backup" else "the database upgrade"
     title = "LogShed upgrade stopped"
     body = (
-        f"LogShed {marker.get('app_version')} could not upgrade its database from schema {marker.get('from_schema')} "
-        f"to {marker.get('target_schema')}: {stage} failed. {recovery_state_sentence(marker)} LogShed is not "
+        f"LogShed {marker.get('app_version')} could not upgrade the database of {release_label(marker.get('from_schema'))}: "
+        f"{stage} failed. {recovery_state_sentence(marker)} LogShed is not "
         "receiving or storing logs until you act: open LogShed to see the error and retry."
     )
     try:
@@ -753,7 +754,8 @@ async def _enter_recovery(db_path, run: MigrationRun, error: BaseException) -> N
     if not detail.endswith("."):
         detail += "."
     logger.error(
-        f"The database upgrade from schema {run.from_version} to {run.target_version} stopped "
+        f"The database upgrade from {release_label(run.from_version)} (schema {run.from_version}) to LogShed "
+        f"{APP_VERSION} (schema {run.target_version}) stopped "
         f"({'backup' if stage == 'backup' else 'migration'} failed): {detail} LogShed is in recovery mode and is not "
         "receiving logs; open the web UI to retry, or go back to the version you ran before."
     )
@@ -875,14 +877,16 @@ async def lifespan(app: FastAPI):
         lifecycle.set_retry_handler(lambda skip_backup, marker: _retry_from_recovery(db_path, skip_backup, marker))
         if plan == lifecycle.PLAN_RECOVERY:
             logger.error(
-                f"The last database upgrade from schema {marker.get('from_schema')} to {marker.get('target_schema')} failed "
+                f"The last database upgrade from {release_label(marker.get('from_schema'))} (schema {marker.get('from_schema')}) "
+                f"to LogShed {APP_VERSION} (schema {marker.get('target_schema')}) failed "
                 f"({marker.get('error')}). LogShed starts in recovery mode and is not receiving logs; open the web UI "
                 "to retry, or go back to the version you ran before."
             )
             lifecycle.set_recovery(marker)
         else:
             logger.info(
-                f"The database needs an upgrade from schema {version} to {_latest_schema()}. LogShed answers with a status "
+                f"The database needs an upgrade from {release_label(version)} (schema {version}) to LogShed {APP_VERSION} "
+                f"(schema {_latest_schema()}). LogShed answers with a status "
                 "page until it is done; do not restart the container."
             )
             _begin_upgrade(db_path, version)
@@ -976,7 +980,7 @@ def _upgrade_progress_text(snap: dict) -> str:
             )
         return "Backing up the database"
     if stage == "migrate":
-        text = f"Upgrading the database from schema {snap.get('from_schema')} to {snap.get('target_schema')}"
+        text = f"Upgrading the database from {release_label(snap.get('from_schema'))} to LogShed {APP_VERSION}"
         return text + (f" (step {min(done + 1, total)} of {total})" if total else "")
     return "Starting LogShed"
 

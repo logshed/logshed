@@ -37,6 +37,7 @@ from app.core.config import (
     resolve_backup_before_migration,
     thinking_level_for_budget,
 )
+from app.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -771,6 +772,29 @@ MIGRATIONS = [
     (4, migrate_v4),
 ]
 
+# The newest LogShed release line that runs each schema. Users see these instead of schema numbers
+# (backup names, the upgrade status page, recovery mode, restore), and that line's image runs a
+# database at that schema, so it is the one to go back to. Schema 1 ran on 1.0 and 1.1. A step in
+# a patch release (a v5 in 1.4.x) splits its line: name exact versions then (4: "1.4.0", 5: "1.4.1").
+SCHEMA_RELEASES: dict[int, str] = {1: "1.1", 2: "1.2", 3: "1.3", 4: "1.4"}
+
+
+def schema_release(schema: Optional[int]) -> Optional[str]:
+    """The release line (or exact version) that runs a schema, or None for one this release does not know."""
+    return SCHEMA_RELEASES.get(schema) if schema is not None else None
+
+
+def schema_release_text(schema: Optional[int]) -> Optional[str]:
+    """A schema as users read it ('1.3.x'), or None for one this release does not know."""
+    release = schema_release(schema)
+    return db_backup.release_text(release) if release else None
+
+
+def release_label(schema: Optional[int]) -> str:
+    """'LogShed 1.3.x' for a schema, or 'schema N' for one this release does not know."""
+    text = schema_release_text(schema)
+    return f"LogShed {text}" if text else f"schema {schema}"
+
 
 def _no_extra_space(db_size: int) -> int:
     return 0
@@ -992,7 +1016,7 @@ def _backup_before_migrations(
     try:
         return db_backup.create_backup(
             db_path,
-            kind=f"pre-v{current_version}-to-v{target}",
+            kind=db_backup.upgrade_kind(schema_release(current_version) or str(current_version)),
             schema_version=current_version,
             target_schema=target,
             method=method,
@@ -1002,7 +1026,10 @@ def _backup_before_migrations(
             day_files=day_files,
         )
     except (db_backup.BackupError, OSError, sqlite3.Error) as e:
-        logger.warning(f"The backup before upgrading from schema {current_version} to {target} failed: {e}")
+        logger.warning(
+            f"The backup before upgrading from {release_label(current_version)} (schema {current_version}) "
+            f"to LogShed {APP_VERSION} (schema {target}) failed: {e}"
+        )
         raise MigrationBackupError(e, current_version, target) from e
 
 

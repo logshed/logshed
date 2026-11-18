@@ -472,6 +472,14 @@ class TestSystemMetricsSourcesAndBackup:
         data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
         assert data["last_backup"] == {"created_at": "2026-11-10T08:00:00+00:00", "size_bytes": 1234}
 
+        # Names with LogShed versions and names with schemas, newest across both
+        (folder / "logshed-backup-upgrade-1.3-to-1.4.0-20261111T080000Z.tar.gz").write_bytes(b"x" * 55)
+        data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
+        assert data["last_backup"] == {"created_at": "2026-11-11T08:00:00+00:00", "size_bytes": 55}
+        (folder / "logshed-backup-manual-v4-20261112T080000Z-2.tar.gz").write_bytes(b"x" * 66)
+        data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
+        assert data["last_backup"] == {"created_at": "2026-11-12T08:00:00+00:00", "size_bytes": 66}
+
     @pytest.mark.asyncio
     async def test_unreadable_backups_folder_leaves_last_backup_empty(
         self, client: AsyncClient, full_token_headers: dict, tmp_path: Path
