@@ -26,7 +26,9 @@ from app.core.config import get_db_path
 from app.models import BackupItem, BackupJobResponse, BackupListResponse, MessageResponse
 from app.services.operation_guard import OperationInProgressError, start_exclusive
 
-logger = logging.getLogger(__name__)
+# LogShed's own logs take their app name from the logger's last part: "backup", as core/backup.py
+# logs, so the Console finds every backup line under one name.
+logger = logging.getLogger("app.backup")
 
 router = APIRouter(prefix="/system/backups", tags=["System & Maintenance"])
 

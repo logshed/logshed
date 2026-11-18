@@ -244,6 +244,18 @@ async def test_delete_removes_one_archive(env, client):
     assert (await client.delete(f"/api/system/backups/{MANUAL}")).status_code == 404
 
 
+async def test_a_backup_and_its_delete_log_under_one_app_name(env, client, caplog):
+    # LogShed's own log lines take their app name from the last part of the logger's name
+    caplog.set_level("INFO", logger="app")
+    assert (await client.post("/api/system/backups")).status_code == 202
+    job = await _finished_job(client)
+    assert job["state"] == "done", job
+    assert (await client.delete(f"/api/system/backups/{job['filename']}")).status_code == 200
+    about = [r for r in caplog.records if r.name.startswith("app.") and job["filename"] in r.getMessage()]
+    assert len(about) >= 2
+    assert {r.name.rsplit(".", 1)[-1] for r in about} == {"backup"}
+
+
 async def test_storage_overview_counts_the_backups(env, client):
     _fake_archive(env, MANUAL, 1000)
     _fake_archive(env, PRE, 500)
