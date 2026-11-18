@@ -73,10 +73,10 @@ class TestMap:
         assert activity.last_seen(NAS_IP) == T0 + 5
         assert activity.last_seen("10.9.9.9") is None
 
-    def test_logshed_own_logs_are_not_a_source(self):
+    def test_logshed_own_logs_count_for_its_own_address(self):
         activity = SourceActivity()
         activity.note([{"source_ip": "127.0.0.1", "source_kind": KIND_INTERNAL}], now_us=T0)
-        assert activity.by_address() == {}
+        assert activity.by_address() == {"127.0.0.1": T0}
 
     def test_made_up_addresses_cannot_grow_the_map_without_end(self, monkeypatch):
         monkeypatch.setattr(source_activity, "MAX_SOURCES", 10)
@@ -231,6 +231,31 @@ class TestSourcesPage:
         by_ip = {a["ip"]: a for a in resp.json()}
         assert by_ip[NAS_IP]["last_seen"] == us_to_iso(T0)
         assert by_ip["10.1.1.1"]["last_seen"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_alias_for_logshed_itself_shows_when_it_last_logged(self, client, headers, db_file: Path):
+        with open_db(db_file) as conn:
+            conn.execute(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('127.0.0.1', 'LogShed', '2026-11-01T00:00:00+00:00')"
+            )
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        # A log LogShed wrote about itself, as InternalLogHandler queues it
+        entry = {
+            "timestamp": now, "received_at": now, "source_ip": "127.0.0.1", "source_alias": "LogShed",
+            "source_kind": KIND_INTERNAL, "app_name": "backup", "facility": 1, "severity": 6,
+            "message": "Database backup written", "raw": "Database backup written",
+        }
+        q = get_queue()
+        q.put_nowait(entry)
+        consumer = QueueConsumer(db_file)
+        consumer._running = True
+        assert await asyncio.wait_for(consumer._flush_batch([q.get_nowait()], q), timeout=5) is True
+        await asyncio.to_thread(consumer._close_conn)
+
+        resp = await client.get("/api/aliases", headers=headers)
+
+        by_ip = {a["ip"]: a for a in resp.json()}
+        assert by_ip["127.0.0.1"]["last_seen"] is not None
 
     @pytest.mark.asyncio
     async def test_docker_host_rows_carry_their_containers_newest_log(self, client, headers, db_file: Path):

@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Iterable, Optional, Union
 
 from app.core.config import get_db_path
-from app.core.day_files import KIND_INTERNAL
 from app.core.migrations import get_connection
 
 logger = logging.getLogger(__name__)
@@ -46,9 +45,8 @@ class SourceActivity:
             return
         now = now_us if now_us is not None else int(time.time() * 1_000_000)
         with self._lock:
+            # LogShed's own logs count too (127.0.0.1, KIND_INTERNAL): an alias for that address shows when LogShed last logged
             for key in keys:
-                if key[1] == KIND_INTERNAL:
-                    continue
                 self._seen[key] = now
                 self._dirty.add(key)
                 self._evicted.discard(key)
