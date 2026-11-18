@@ -313,6 +313,24 @@ class TestLegacyTableEnd:
             assert log_store.search(conn, LogFilter(query="after"), fetch=5, count_limit=5)[0] == 1
 
     @pytest.mark.asyncio
+    async def test_an_indexing_pass_that_checked_just_before_the_drop_indexes_nothing(self, tmp_path):
+        # The worker checks for the legacy table, then the midnight prune drops it before the
+        # worker's batch takes the write lock: the batch must see the table gone, not fail
+        from app.services import fts_indexer
+
+        path = tmp_path / "logs.db"
+        old = (datetime.datetime.now(_UTC) - datetime.timedelta(days=40)).isoformat()
+        _upgraded_with_legacy(path, [(old, "old")])
+        today = datetime.datetime.now(_UTC).replace(microsecond=0)
+        assert (await retention.execute_prune_async(path, retention_days=14))["legacy_dropped"] is True
+        _write(path, [{**_row(today.date().isoformat(), today.hour), "message": "arrived after the drop"}])
+
+        with open_db(path) as conn, mock.patch.object(fts_indexer, "_has_legacy_logs", return_value=True):
+            assert fts_indexer.index_pending_chunk(conn, batch_size=100) == 1  # the day file's row only
+        with open_db(path, sqlite3.Row) as conn:
+            assert log_store.search(conn, LogFilter(query="arrived"), fetch=5, count_limit=5)[0] == 1
+
+    @pytest.mark.asyncio
     async def test_no_compaction_without_room_and_the_drop_still_happens(self, tmp_path):
         path = tmp_path / "logs.db"
         old = (datetime.datetime.now(_UTC) - datetime.timedelta(days=40)).isoformat()

@@ -38,6 +38,10 @@ def index_pending_batch(conn: sqlite3.Connection, batch_size: int = 1000) -> int
     conn.execute("BEGIN IMMEDIATE")
     with conn:
         cursor = conn.cursor()
+        # Checked again under the write lock: the prune that empties the legacy table drops it with
+        # fts_index_state, and may have done so after the caller looked
+        if cursor.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fts_index_state'").fetchone() is None:
+            return 0
         cursor.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1")
         row = cursor.fetchone()
         if row is None:
