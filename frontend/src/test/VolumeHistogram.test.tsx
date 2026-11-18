@@ -4,7 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as logsApi from '../api/logs.ts';
 import { ApiError } from '../api/client.ts';
 import type { LogHistogram } from '../api/logs.ts';
-import { HISTOGRAM_DEBOUNCE_MS, HISTOGRAM_REFRESH_MS, refreshDelayMs, VolumeHistogram } from '../components/logs/VolumeHistogram.tsx';
+import {
+  HISTOGRAM_DEBOUNCE_MS,
+  HISTOGRAM_REFRESH_MS,
+  MIN_SEGMENT_PX,
+  SCALE_PREF,
+  displayBars,
+  refreshDelayMs,
+  DisplayBar,
+  VolumeBar,
+  VolumeHistogram,
+} from '../components/logs/VolumeHistogram.tsx';
 import { demoHistogram } from '../demo/server.ts';
 
 // ResponsiveContainer measures nothing in jsdom: give the chart a fixed size so its bars render
@@ -92,7 +102,7 @@ describe('VolumeHistogram', () => {
     expect(screen.getByText('Log volume, all logs kept')).toBeInTheDocument();
     expect(screen.getByText(': 8')).toBeInTheDocument();
     expect(chartBox()).toHaveAccessibleName(
-      'Log volume, all logs kept: 8 logs from 3/28 11:00 to 3/28 12:00, most between 3/28 11:00 - 11:30 (7)',
+      'Log volume, all logs kept: 8 logs and 2 errors from 3/28 11:00 to 3/28 12:00, most between 3/28 11:00 - 11:30 (7)',
     );
   });
 
@@ -274,6 +284,62 @@ describe('VolumeHistogram', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Could not load the counts: Database is busy');
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_REFRESH_MS));
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+});
+
+const scaleBar = (start: number, counts: Partial<Record<'error' | 'warning' | 'info' | 'debug', number>>): VolumeBar => {
+  const b = { error: 0, warning: 0, info: 0, debug: 0, ...counts };
+  return { start, end: start + 1, mid: start, total: b.error + b.warning + b.info + b.debug, ...b };
+};
+const drawnTotal = (b: DisplayBar) => b.error_v + b.warning_v + b.info_v + b.debug_v;
+
+describe('the chart scales', () => {
+  it('draws counts on the linear scale, with a severity that has logs at least 3 px tall', () => {
+    const [busy, quiet] = displayBars([scaleBar(0, { info: 50_000 }), scaleBar(1, { error: 1, info: 25_000 })], 'linear', 60);
+    expect([busy.info_v, busy.error_v]).toEqual([50_000, 0]);
+    // One error among 25,001 logs: 0.001 px by its count, drawn MIN_SEGMENT_PX tall
+    expect((quiet.error_v / drawnTotal(busy)) * 60).toBeCloseTo(MIN_SEGMENT_PX, 5);
+    expect(quiet.info_v).toBe(25_000);
+    // The counts themselves are kept for the tooltip
+    expect([quiet.error, quiet.info, quiet.total]).toEqual([1, 25_000, 25_001]);
+  });
+
+  it('puts each colour on the log scale at the logs of its severity and every worse one', () => {
+    // The maintainer's day on 18 Nov: 89 errors, 133 warnings, 53,064 info
+    const [bar] = displayBars([scaleBar(0, { error: 89, warning: 133, info: 53_064 })], 'log', 60);
+    expect(bar.error_v).toBeCloseTo(Math.log10(90), 6);
+    expect(bar.error_v + bar.warning_v).toBeCloseTo(Math.log10(1 + 222), 6);
+    expect(drawnTotal(bar)).toBeCloseTo(Math.log10(1 + 53_286), 6);
+    expect(bar.debug_v).toBe(0);
+    // Red reaches about 40% of the bar instead of a fraction of a pixel
+    expect(bar.error_v / drawnTotal(bar)).toBeGreaterThan(0.4);
+  });
+
+  it('keeps the floor on the log scale and draws nothing for an empty group or range', () => {
+    const [big, small] = displayBars([scaleBar(0, { info: 1_000_000 }), scaleBar(1, { error: 1 })], 'log', 36);
+    expect((small.error_v / drawnTotal(big)) * 36).toBeGreaterThanOrEqual(MIN_SEGMENT_PX - 1e-9);
+    expect([small.warning_v, small.info_v, small.debug_v]).toEqual([0, 0, 0]);
+    expect(displayBars([], 'log', 60)).toEqual([]);
+    expect(displayBars([scaleBar(0, {})], 'linear', 60)[0].info_v).toBe(0);
+  });
+
+  it('switches to a log scale and remembers it in this browser', async () => {
+    localStorage.removeItem(`logshed.${SCALE_PREF}`);
+    const { unmount } = render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    const toggle = screen.getByRole('button', { name: 'Log scale' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(chartBox().getAttribute('aria-label')).not.toContain('log scale');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(chartBox().getAttribute('aria-label')).toMatch(/, on a log scale$/);
+    expect(localStorage.getItem(`logshed.${SCALE_PREF}`)).toBe('"log"');
+    unmount();
+
+    render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(screen.getByRole('button', { name: 'Log scale' })).toHaveAttribute('aria-pressed', 'true');
+    localStorage.removeItem(`logshed.${SCALE_PREF}`);
   });
 });
 

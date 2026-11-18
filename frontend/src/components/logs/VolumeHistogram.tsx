@@ -5,6 +5,7 @@ import { fetchLogHistogram, LogHistogram, LogHistogramBucket } from '../../api/l
 import { ApiError } from '../../api/client.ts';
 import { LogFilterParams } from '../../types.ts';
 import { DAY_MS, buildTimeTicks, formatTimePoint, formatTimeTick } from '../../utils/timeAxis.ts';
+import { readBrowserPref, writeBrowserPref } from '../../utils/browserPrefs.ts';
 
 // Filter edits wait as long as the list's search does, so typing sends one request
 export const HISTOGRAM_DEBOUNCE_MS = 300;
@@ -29,7 +30,7 @@ const GROUPS = [
 
 type GroupKey = (typeof GROUPS)[number]['key'];
 
-interface VolumeBar {
+export interface VolumeBar {
   mid: number;
   start: number;
   end: number;
@@ -102,6 +103,53 @@ const PINNED_OPACITY = 0.45;
 const TAP_SLOP_PX = 10;
 
 const CHART_MARGIN = { top: 4, right: 4, left: 0, bottom: 0 };
+// The time axis under the bars
+const AXIS_HEIGHT = 16;
+
+// The bars' plot height in px (the chart's 80 or 56 px less the top margin and the time axis)
+const PLOT_HEIGHT = { desktop: 80 - CHART_MARGIN.top - AXIS_HEIGHT, mobile: 56 - CHART_MARGIN.top - AXIS_HEIGHT };
+// A severity with any logs is drawn at least this tall (about 3 px of colour inside the 1 px lines between
+// stacked parts), so one error next to 50,000 logs still shows
+export const MIN_SEGMENT_PX = 5;
+
+export type VolumeScale = 'linear' | 'log';
+// The chart's scale, remembered by this browser
+export const SCALE_PREF = 'console.histogram.scale.v1';
+const parseScale = (v: unknown): VolumeScale | null => (v === 'linear' || v === 'log' ? v : null);
+
+/** A bar's drawn height per severity group (in the chart's units); the bar itself keeps the counts. */
+export type DisplayBar = VolumeBar & Record<`${GroupKey}_v`, number>;
+
+/**
+ * What each group of each bar is drawn as. Linear: its count, stacked. Log: each group's top edge
+ * at log10(1 + the logs of that group and every worse one), so red reaches the errors' height, amber
+ * the warnings-or-worse height and so on, and the whole bar log10(1 + total). Either way a group with
+ * any logs is raised to MIN_SEGMENT_PX of the plot's height (worked out from the tallest bar).
+ */
+export function displayBars(bars: VolumeBar[], scale: VolumeScale, plotHeightPx: number): DisplayBar[] {
+  const order = GROUPS.map((g) => g.key);
+  const raw = bars.map((b) => {
+    if (scale === 'linear') return order.map((k) => b[k]);
+    let below = 0;
+    let cumulative = 0;
+    return order.map((k) => {
+      cumulative += b[k];
+      const top = Math.log10(1 + cumulative);
+      const height = top - below;
+      below = top;
+      return b[k] > 0 ? height : 0;
+    });
+  });
+  const tallest = Math.max(0, ...raw.map((parts) => parts.reduce((a, v) => a + v, 0)));
+  const floor = tallest > 0 && plotHeightPx > 0 ? (MIN_SEGMENT_PX * tallest) / plotHeightPx : 0;
+  return bars.map((b, i) => {
+    const shown = { ...b } as DisplayBar;
+    order.forEach((k, n) => {
+      shown[`${k}_v`] = b[k] > 0 ? Math.max(raw[i][n], floor) : 0;
+    });
+    return shown;
+  });
+}
 
 /**
  * Where the pinned box goes for a bar at fraction x of the chart's width: its left edge (a bar on
@@ -153,6 +201,13 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   // The chart's width, which sets the bars' width (Recharts takes it from the gaps between bars,
   // which a lone bar does not have, so it drew none)
   const [chartWidth, setChartWidth] = useState(0);
+  // Linear, or log so a few errors among many logs show at a readable height
+  const [scale, setScale] = useState<VolumeScale>(() => readBrowserPref(SCALE_PREF, parseScale) ?? 'linear');
+  const toggleScale = () => {
+    const next = scale === 'log' ? 'linear' : 'log';
+    setScale(next);
+    writeBrowserPref(SCALE_PREF, next);
+  };
   const key = filterKey(filters);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
@@ -222,6 +277,10 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
 
   const bucketMs = data ? data.bucket_seconds * 1000 : 0;
   const bars = useMemo(() => (data ? data.buckets.map((b, i, all) => toBar(b, i, all, bucketMs)) : []), [data, bucketMs]);
+  const shownBars = useMemo(
+    () => displayBars(bars, scale, isMobile ? PLOT_HEIGHT.mobile : PLOT_HEIGHT.desktop),
+    [bars, scale, isMobile],
+  );
   const stale = data !== null && dataKey !== key;
   const withSeconds = data !== null && data.bucket_seconds < 60;
   // 1-second bars are the smallest: zooming into one would show a single bar
@@ -275,9 +334,11 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   if (data && !canZoom && !stale) hint = '1-second bars, the smallest';
   else if (data && !isMobile) hint = touchUsed ? 'Tap a bar for its counts' : 'Click a bar to zoom in';
   const busiest = bars.reduce<VolumeBar | null>((top, b) => (!top || b.total > top.total ? b : top), null);
+  const errors = bars.reduce((sum, b) => sum + b.error, 0);
   const summary = data
-    ? `${caption}: ${total.toLocaleString()} logs from ${formatTimePoint(rangeFrom, timeZone, withSeconds)} to ${formatTimePoint(rangeTo, timeZone, withSeconds)}` +
-      (busiest && busiest.total > 0 ? `, most between ${spanLabel(busiest, timeZone, withSeconds)} (${busiest.total.toLocaleString()})` : '')
+    ? `${caption}: ${total.toLocaleString()} logs${errors > 0 ? ` and ${errors.toLocaleString()} ${errors === 1 ? 'error' : 'errors'}` : ''} from ${formatTimePoint(rangeFrom, timeZone, withSeconds)} to ${formatTimePoint(rangeTo, timeZone, withSeconds)}` +
+      (busiest && busiest.total > 0 ? `, most between ${spanLabel(busiest, timeZone, withSeconds)} (${busiest.total.toLocaleString()})` : '') +
+      (scale === 'log' ? ', on a log scale' : '')
     : `${caption}: loading`;
 
   return (
@@ -288,6 +349,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
           {caption}
           {data && <span className="text-fg">: {total.toLocaleString()}</span>}
         </span>
+        <span className="flex items-center gap-3 min-w-0">
         {error ? (
           <span role="status" className="text-danger-300 truncate">Could not load the counts: {error}</span>
         ) : stale ? (
@@ -296,6 +358,20 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         ) : (
           hint && <span>{hint}</span>
         )}
+          {data && (
+            <button
+              type="button"
+              aria-pressed={scale === 'log'}
+              onClick={toggleScale}
+              title={scale === 'log' ? 'Show counts on a linear scale' : 'Show counts on a log scale, so a few errors among many logs show'}
+              className={`shrink-0 rounded-xs px-1 cursor-pointer focus-visible:outline-2 focus-visible:outline-accent-500 ${
+                scale === 'log' ? 'text-accent-300' : 'text-fg-muted hover:text-fg'
+              }`}
+            >
+              Log scale
+            </button>
+          )}
+        </span>
       </div>
       <div
         className={`relative ${isMobile ? 'h-14' : 'h-20'} ${stale ? 'opacity-50 pointer-events-none' : ''} ${canZoom ? 'cursor-pointer' : ''} [&_[tabindex="-1"]]:outline-none`}
@@ -323,7 +399,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         {data && (
           <ResponsiveContainer width="100%" height="100%" onResize={(width) => setChartWidth(width)}>
             <BarChart
-              data={bars}
+              data={shownBars}
               margin={CHART_MARGIN}
               barSize={barSize}
               // Off: its keyboard focus drew the browser's focus box around the bars on every
@@ -339,7 +415,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
                 tickFormatter={(ms: number) => formatTimeTick(ms, stepMs, timeZone, spansDays)}
                 stroke="var(--color-fg-subtle)"
                 tick={{ fontSize: 10 }}
-                height={16}
+                height={AXIS_HEIGHT}
                 tickLine={false}
               />
               <YAxis hide domain={[0, 'dataMax']} />
@@ -357,7 +433,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
               {GROUPS.map((g) => (
                 <Bar
                   key={g.key}
-                  dataKey={g.key as GroupKey}
+                  dataKey={`${g.key}_v`}
                   stackId="volume"
                   fill={g.color}
                   // A line in the band's colour between stacked parts, whose colours are close to each other
