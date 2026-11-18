@@ -13,6 +13,7 @@ This guide explains how to configure real-time alert rules and ingestion drop ru
   - [Rate Spike & Culprit Analysis](#rate-spike--culprit-analysis)
   - [Practical Alert Rule Examples](#practical-alert-rule-examples)
   - [Testing Alert Rules](#testing-alert-rules)
+  - [Resetting Counters](#resetting-counters)
   - [Creating an Alert Rule from a Log](#creating-an-alert-rule-from-a-log)
   - [Inspecting an Incident in the Console](#inspecting-an-incident-in-the-console)
 - [Ingestion Drop Rules](#drop-rules)
@@ -200,6 +201,15 @@ Use the **Test Rule** button on any configured rule to open the dry-run tester. 
 
 To see how often a rule would have matched real logs, click **Check last 24h** in the rule dialog while you write it. LogShed runs the rule's own matching (its filters and pattern, exactly as a saved rule matches) over the logs stored in the last 24 hours, newest first, and shows how many matched with the newest five. It counts single logs: a threshold rule fires only when enough of them fall inside its window, and cooldowns and maintenance windows are not applied, so the rule alerts less often than the count suggests. On a busy server the check stops after 200,000 logs or 5 seconds and says how far back it reached. One check runs at a time.
 
+### Resetting Counters
+
+Each alert rule counts how often it fired ("Fired 3x" in the list), and each drop rule how many logs it dropped. To start a count again:
+
+- **One rule:** open it with Edit and click **Reset counter to 0**. The editor stays open, and the count shows 0 at once.
+- **Every rule:** click **Reset all counters** at the top of the Alert Rules or Drop Rules tab. A dialog says how many rules and what total it clears before anything changes.
+
+A reset sets only the count to 0: an alert rule keeps its "Last triggered" time and its incidents in Alert History, and the next firing (or dropped log) counts from 1. Changing a drop rule's host, app, pattern or severity also resets its counter, since the old count no longer describes it.
+
 ### Creating an Alert Rule from a Log
 
 In the Console, click a log entry to open the Log Detail drawer, then click **Create Alert Rule** (next to **Create Drop Rule**). A new rule dialog opens on top of the drawer, starting with:
@@ -225,7 +235,7 @@ In any homelab environment, certain daemons and containers produce overwhelming 
 Ingestion Drop Rules evaluate incoming syslog and container logs **in memory** before SQLite database persistence and FTS5 full-text indexing:
 - **Zero Disk Write Overhead**: Dropped logs never hit disk, saving SSD write cycles and keeping SQLite database files lean.
 - **Index Protection**: Prevents full-text search indexes from bloating with repetitive noise.
-- **Accurate Live Counters**: LogShed maintains in-memory drop counters for each active rule, flushing aggregate counts periodically to SQLite so you can see exactly how many log lines each rule has filtered.
+- **Accurate Live Counters**: LogShed maintains in-memory drop counters for each active rule, flushing aggregate counts periodically to SQLite so you can see exactly how many log lines each rule has filtered. See [Resetting Counters](#resetting-counters) to start a count again.
 
 ### Drop Rule Fields & Filtering
 

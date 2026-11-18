@@ -369,6 +369,11 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     window_seconds: 60, cooldown_seconds: 300, ai_enrichment: false, is_enabled: true, ...b,
     trigger_count: 0, last_triggered_at: null, suppress_until: null, created_at: nowIso(), display_order: store.alertRules.items.length,
   })),
+  ['POST', /^\/api\/alerts\/rules\/reset$/, () => {
+    store.alertRules.items.forEach((r) => store.alertRules.update(r.id, { trigger_count: 0 }));
+    return { status: 'ok' };
+  }],
+  ['POST', /^\/api\/alerts\/rules\/(\d+)\/reset$/, (m) => found(store.alertRules.update(Number(m[1]), { trigger_count: 0 }))],
   ['PUT', /^\/api\/alerts\/rules\/reorder$/, (_m, _q, b) => store.alertRules.reorder((b?.rule_ids as number[]) || [])],
   ['GET', /^\/api\/alerts\/rules\/export$/, () => ({ rules: store.alertRules.items })],
   ['GET', /^\/api\/alerts\/rules\/(\d+)\/export$/, (m) => ({ rules: [found(store.alertRules.get(Number(m[1])))] })],
@@ -439,6 +444,10 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     ...b, dropped_count: 0, created_at: nowIso(), display_order: store.dropRules.items.length,
   })),
   ['PUT', /^\/api\/drop-rules\/reorder$/, (_m, _q, b) => store.dropRules.reorder((b?.rule_ids as number[]) || [])],
+  ['POST', /^\/api\/drop-rules\/reset$/, () => {
+    store.dropRules.items.forEach((r) => store.dropRules.update(r.id, { dropped_count: 0 }));
+    return { status: 'ok' };
+  }],
   ['POST', /^\/api\/drop-rules\/(\d+)\/reset$/, (m) => found(store.dropRules.update(Number(m[1]), { dropped_count: 0 }))],
   ['GET', /^\/api\/drop-rules\/export$/, () => ({ rules: store.dropRules.items })],
   ['GET', /^\/api\/drop-rules\/(\d+)\/export$/, (m) => ({ rules: [found(store.dropRules.get(Number(m[1])))] })],

@@ -702,6 +702,33 @@ async def update_alert_rule(
     return _row_to_alert_rule_response(updated_row)
 
 
+@router.post("/rules/reset", response_model=MessageResponse)
+async def reset_all_alert_rule_counters(user: dict = Depends(get_current_user)) -> MessageResponse:
+    """Reset the trigger count of every alert rule. Last triggered stays."""
+    def _reset(conn):
+        count = conn.execute("UPDATE alert_rules SET trigger_count = 0").rowcount
+        conn.commit()
+        return count
+
+    # No reload of the evaluator: each firing adds 1 to the stored count, and a reload could drop a
+    # cooldown that a firing has started in memory but not yet stored
+    count = await run_db_query(_reset)
+    return MessageResponse(status="ok", detail=f"Reset the counters of {count} alert {'rule' if count == 1 else 'rules'}.")
+
+
+@router.post("/rules/{rule_id}/reset", response_model=AlertRuleResponse)
+async def reset_alert_rule_counter(rule_id: int, user: dict = Depends(get_current_user)) -> AlertRuleResponse:
+    """Reset one alert rule's trigger count. Last triggered stays."""
+    def _reset(conn):
+        updated = conn.execute("UPDATE alert_rules SET trigger_count = 0 WHERE id = ?", (rule_id,)).rowcount
+        conn.commit()
+        return updated
+
+    if await run_db_query(_reset) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Alert rule {rule_id} not found.")
+    return _row_to_alert_rule_response(await _fetch_alert_rule_row(rule_id))
+
+
 @router.delete("/rules/{rule_id}", response_model=MessageResponse)
 async def delete_alert_rule(
     rule_id: int,

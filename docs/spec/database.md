@@ -227,6 +227,7 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
    );
 
    ```
+   Each firing stores `last_triggered_at` and `suppress_until` and adds 1 to `trigger_count` (`trigger_count = trigger_count + 1`), rather than writing the count the evaluator holds in memory, so a reset (`POST /api/alerts/rules/reset`, or one rule's) is not undone by a firing whose rule was loaded before it.
 
 6. **Alert Incident History (`alert_history`):**
    Records fired alert incidents, sample logs, AI root-cause summaries, and references to the AI audit log:

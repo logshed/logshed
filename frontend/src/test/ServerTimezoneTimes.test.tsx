@@ -90,6 +90,7 @@ describe('times shown in the server time zone', () => {
         onOpenEditModal={vi.fn()}
         onDeleteRule={vi.fn()}
         onNavigateToSettings={vi.fn()}
+        onResetAllCounters={vi.fn()}
         getChannelStatus={() => ({ name: 'None', warning: null, isInvalid: false })}
       />
     );

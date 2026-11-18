@@ -54,6 +54,10 @@ export async function previewDropRule(data: DropRulePreviewRequest): Promise<Rul
   });
 }
 
+export async function resetAllDropRuleCounters(): Promise<{ status: string; detail?: string }> {
+  return apiFetch<{ status: string; detail?: string }>('/api/drop-rules/reset', { method: 'POST' });
+}
+
 export async function resetDropRuleCounter(id: number): Promise<DropRule> {
   return apiFetch<DropRule>(`/api/drop-rules/${id}/reset`, {
     method: 'POST',

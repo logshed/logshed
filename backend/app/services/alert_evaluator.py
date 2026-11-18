@@ -651,7 +651,11 @@ class AlertEvaluator:
             logger.warning(f"Failed to reload alert rules after automatic disables: {exc}")
 
     def _update_rule_trigger_state(self, rule: CompiledAlertRule) -> None:
-        """Persist last_triggered_at, suppress_until, and trigger_count to SQLite."""
+        """
+        Store last_triggered_at and suppress_until, and add this firing to the stored trigger_count.
+        Adding instead of writing the count held in memory keeps a reset (Reset counters) from being
+        undone by a firing whose rule was loaded before it.
+        """
         from app.core.config import get_db_path
         from app.api.deps import get_thread_connection
         effective_db = self.db_path or get_db_path()
@@ -664,10 +668,10 @@ class AlertEvaluator:
                 conn.execute(
                     """
                     UPDATE alert_rules
-                    SET last_triggered_at = ?, suppress_until = ?, trigger_count = ?
+                    SET last_triggered_at = ?, suppress_until = ?, trigger_count = trigger_count + 1
                     WHERE id = ?
                     """,
-                    (rule.last_triggered_at, rule.suppress_until, rule.trigger_count, rule.id),
+                    (rule.last_triggered_at, rule.suppress_until, rule.id),
                 )
         except Exception as exc:
             logger.warning(f"Failed to persist trigger state for rule {rule.id}: {exc}")

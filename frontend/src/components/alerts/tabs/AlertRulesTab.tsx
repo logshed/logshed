@@ -19,6 +19,7 @@ import { runningTargets } from '../../../utils/maintenanceSchedule.ts';
 import { useServerTimezone } from '../../../utils/hooks.ts';
 import { useReorderableList } from '../../../utils/useReorderableList.ts';
 import { RuleOrderControls } from '../RuleOrderControls.tsx';
+import { ResetCountersButton } from '../ResetCountersButton.tsx';
 import { buttonClass } from '../../common/Button.tsx';
 import { Card } from '../../common/Card.tsx';
 
@@ -41,6 +42,8 @@ export interface AlertRulesTabProps {
   onDeleteRule: (rule: AlertRule) => void;
   onNavigateToSettings: () => void;
   onReorderRules?: (rules: AlertRule[]) => void;
+  /** Sets every rule's trigger count to 0 (Last triggered stays), then reloads the rules. */
+  onResetAllCounters: () => Promise<void>;
   getChannelStatus: (channelId?: number | null) => {
     name: string;
     warning: string | null;
@@ -67,6 +70,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
   onDeleteRule,
   onNavigateToSettings,
   onReorderRules,
+  onResetAllCounters,
   getChannelStatus,
 }) => {
   const { draggedIndex, moveItem, dragProps } = useReorderableList(rules, (newOrder) => onReorderRules?.(newOrder));
@@ -151,6 +155,15 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <Zap className="w-3.5 h-3.5 text-accent-500" />
               <span>Presets</span>
             </button>
+
+            <ResetCountersButton
+              ruleNoun="alert rule"
+              ruleCount={rules.filter((r) => r.trigger_count > 0).length}
+              total={rules.reduce((acc, r) => acc + (r.trigger_count || 0), 0)}
+              unit={['firing', 'firings']}
+              keeps="Last triggered times and the alert history stay."
+              onReset={onResetAllCounters}
+            />
 
             <button
               type="button"

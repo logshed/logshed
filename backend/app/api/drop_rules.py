@@ -517,6 +517,20 @@ async def delete_drop_rule(
     return MessageResponse(status="ok", detail=f"Rule {rule_id} deleted successfully.")
 
 
+@router.post("/reset", response_model=MessageResponse)
+async def reset_all_drop_rule_counters(user: dict = Depends(get_current_user)) -> MessageResponse:
+    """Reset the dropped log counter of every drop rule."""
+    def _reset(conn):
+        count = conn.execute("UPDATE drop_rules SET dropped_count = 0").rowcount
+        conn.commit()
+        return count
+
+    count = await run_db_query(_reset)
+    # Only clear the in-memory counts once the stored reset has been committed
+    get_drop_filter().reset_all_counts()
+    return MessageResponse(status="ok", detail=f"Reset the counters of {count} drop {'rule' if count == 1 else 'rules'}.")
+
+
 @router.post("/{rule_id}/reset", response_model=DropRuleResponse)
 async def reset_drop_rule_counter(
     rule_id: int,

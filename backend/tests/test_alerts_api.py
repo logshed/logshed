@@ -19,7 +19,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
-from app.services.alert_evaluator import init_alert_evaluator
+from app.services.alert_evaluator import get_alert_evaluator, init_alert_evaluator
 from app.services.drop_filter import init_drop_filter
 
 
@@ -454,6 +454,69 @@ class TestAlertsApi:
         data = res.json()
         assert data["matched"] is False
         assert "backtracking" in (data["error"] or "").lower()
+
+
+class TestAlertRuleCounterReset:
+    """Reset counters: every rule's or one rule's trigger count goes to 0, and Last triggered stays."""
+
+    @staticmethod
+    async def _rule(client: AsyncClient, headers: dict, name: str, pattern: str) -> int:
+        payload = {"name": name, "rule_type": "threshold", "match_pattern": pattern, "threshold_count": 1,
+                   "window_seconds": 60, "cooldown_seconds": 300, "is_enabled": True}
+        res = await client.post("/api/alerts/rules", json=payload, headers=headers)
+        assert res.status_code == 201
+        return res.json()["id"]
+
+    @staticmethod
+    async def _fire(message: str) -> None:
+        evaluator = get_alert_evaluator()
+        for rule in evaluator._rules:
+            rule.suppress_until_epoch = None
+        now = datetime.now(timezone.utc).isoformat()
+        await evaluator.evaluate_batch([{"id": 1, "app_name": "app", "source_alias": "nas", "message": message,
+                                         "raw": message, "severity": 3, "timestamp": now}])
+        await evaluator.stop()
+
+    @staticmethod
+    async def _counts(client: AsyncClient, headers: dict) -> dict:
+        rules = (await client.get("/api/alerts/rules", headers=headers)).json()
+        return {r["id"]: (r["trigger_count"], r["last_triggered_at"] is not None) for r in rules}
+
+    @pytest.mark.asyncio
+    async def test_reset_all_and_one(self, client: AsyncClient, auth_headers: dict, monkeypatch):
+        from app.services.notifier import NotifierService
+
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            return True
+
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+        disk = await self._rule(client, auth_headers, "Disk", "disk failed")
+        fan = await self._rule(client, auth_headers, "Fan", "fan stopped")
+        for _ in range(3):
+            await self._fire("disk failed")
+        await self._fire("fan stopped")
+        assert await self._counts(client, auth_headers) == {disk: (3, True), fan: (1, True)}
+
+        res = await client.post(f"/api/alerts/rules/{disk}/reset", headers=auth_headers)
+        assert res.status_code == 200
+        assert res.json()["trigger_count"] == 0 and res.json()["last_triggered_at"] is not None
+        assert await self._counts(client, auth_headers) == {disk: (0, True), fan: (1, True)}
+        # A firing after the reset counts from 1, not from the count the evaluator held
+        await self._fire("disk failed")
+        assert await self._counts(client, auth_headers) == {disk: (1, True), fan: (1, True)}
+
+        res = await client.post("/api/alerts/rules/reset", headers=auth_headers)
+        assert res.status_code == 200 and res.json()["detail"] == "Reset the counters of 2 alert rules."
+        assert await self._counts(client, auth_headers) == {disk: (0, True), fan: (0, True)}
+        await self._fire("fan stopped")
+        assert await self._counts(client, auth_headers) == {disk: (0, True), fan: (1, True)}
+
+    @pytest.mark.asyncio
+    async def test_reset_needs_a_session_and_a_rule(self, client: AsyncClient, auth_headers: dict):
+        assert (await client.post("/api/alerts/rules/reset")).status_code == 401
+        assert (await client.post("/api/alerts/rules/1/reset")).status_code == 401
+        assert (await client.post("/api/drop-rules/reset")).status_code == 401
+        assert (await client.post("/api/alerts/rules/999/reset", headers=auth_headers)).status_code == 404
 
 
 class TestMaintenanceWindowApi:

@@ -244,6 +244,11 @@ class DropFilter:
         with self._lock:
             self._pending_counts.pop(rule_id, None)
 
+    def reset_all_counts(self) -> None:
+        """Clear the pending in-memory counts of every rule."""
+        with self._lock:
+            self._pending_counts = {}
+
     def flush_counts(self, conn: Optional[sqlite3.Connection] = None) -> int:
         """
         Flush accumulated drop counts to SQLite.

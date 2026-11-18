@@ -33,6 +33,14 @@ export async function updateAlertRule(id: number, data: AlertRuleUpdate): Promis
   });
 }
 
+export async function resetAlertRuleCounter(id: number): Promise<AlertRule> {
+  return apiFetch<AlertRule>(`/api/alerts/rules/${id}/reset`, { method: 'POST' });
+}
+
+export async function resetAllAlertRuleCounters(): Promise<{ status: string; detail?: string }> {
+  return apiFetch<{ status: string; detail?: string }>('/api/alerts/rules/reset', { method: 'POST' });
+}
+
 export async function deleteAlertRule(id: number): Promise<{ status: string }> {
   return apiFetch<{ status: string }>('/api/alerts/rules/' + id, {
     method: 'DELETE',

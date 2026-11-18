@@ -511,6 +511,30 @@ class TestDropRulesApi:
         assert reset_res.json()["name"] == "Custom Drop Rule"
 
     @pytest.mark.asyncio
+    async def test_reset_all_counters(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        first = (await client.post("/api/drop-rules", json={"message_pattern": "first_noise"})).json()["id"]
+        second = (await client.post("/api/drop-rules", json={"message_pattern": "second_noise"})).json()["id"]
+        flt = get_drop_filter()
+        for _ in range(3):
+            flt.should_drop(None, None, None, "a first_noise line")
+        flt.flush_counts()
+        # Not flushed yet: the reset clears it too
+        flt.should_drop(None, None, None, "a second_noise line")
+
+        res = await client.post("/api/drop-rules/reset")
+        assert res.status_code == 200
+        assert res.json()["detail"] == "Reset the counters of 2 drop rules."
+        listed = {r["id"]: r["dropped_count"] for r in (await client.get("/api/drop-rules")).json()}
+        assert listed == {first: 0, second: 0}
+
+        # A drop after the reset counts from 1
+        flt.should_drop(None, None, None, "a second_noise line")
+        flt.flush_counts()
+        listed = {r["id"]: r["dropped_count"] for r in (await client.get("/api/drop-rules")).json()}
+        assert listed == {first: 0, second: 1}
+
+    @pytest.mark.asyncio
     async def test_update_rule_resets_counter_on_criteria_change(self, client: AsyncClient, auth_cookie: dict):
         client.cookies = auth_cookie
         create_res = await client.post(

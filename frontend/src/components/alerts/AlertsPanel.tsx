@@ -18,6 +18,7 @@ import {
 } from '../../types.ts';
 import {
   fetchAlertRules,
+  resetAllAlertRuleCounters,
   updateAlertRule,
   deleteAlertRule,
   fetchAlertPresets,
@@ -249,6 +250,25 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     setIsRuleModalOpen(true);
   };
 
+  const handleResetAllCounters = async () => {
+    try {
+      await resetAllAlertRuleCounters();
+      setFeedbackMsg({ text: 'Every alert rule counter is back to 0.', isError: false });
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to reset the counters.', isError: true });
+    }
+    try {
+      setRules(await fetchAlertRules());
+    } catch {
+      // The list keeps what it showed; the next load corrects it
+    }
+  };
+
+  // A counter reset in the rule editor (the editor stays open)
+  const handleRuleCounterReset = (updated: AlertRule) => {
+    setRules((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+  };
+
   // Handle saved rule from AlertRuleModal
   const handleRuleSuccess = (savedRule: AlertRule) => {
     if (ruleToEdit) {
@@ -475,6 +495,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           onDeleteRule={(rule) => setRuleToDelete(rule)}
           onNavigateToSettings={handleNavigateToSettings}
           onReorderRules={handleReorderRules}
+          onResetAllCounters={handleResetAllCounters}
           getChannelStatus={getChannelStatus}
         />
       )}
@@ -539,6 +560,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           setRulePrefill(null);
         }}
         onSuccess={handleRuleSuccess}
+        onCounterReset={handleRuleCounterReset}
       />
 
       {/* TEST PATTERN MODAL */}

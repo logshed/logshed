@@ -1,7 +1,7 @@
 import React, { useId, useState, useEffect, useMemo } from 'react';
-import { Sparkles, RefreshCw, ExternalLink, TextSelect } from 'lucide-react';
+import { Sparkles, RefreshCw, ExternalLink, TextSelect, RotateCcw } from 'lucide-react';
 import { AlertRule, AlertRuleCreate, AlertRuleType, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
-import { createAlertRule, previewAlertRule, updateAlertRule } from '../../api/alerts.ts';
+import { createAlertRule, previewAlertRule, resetAlertRuleCounter, updateAlertRule } from '../../api/alerts.ts';
 import { RulePreviewPanel } from './RulePreviewPanel.tsx';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
@@ -55,6 +55,8 @@ export interface AlertRuleModalProps {
   onNavigateToSettings?: () => void;
   onClose: () => void;
   onSuccess: (savedRule: AlertRule) => void;
+  /** After the editor's Reset counter to 0: the rule with its count at 0 (the editor stays open). */
+  onCounterReset?: (rule: AlertRule) => void;
 }
 
 export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
@@ -69,6 +71,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   onNavigateToSettings,
   onClose,
   onSuccess,
+  onCounterReset,
 }) => {
   const activePrefill = ruleToEdit ? null : prefill || null;
   const initialName = activePrefill?.name || '';
@@ -78,6 +81,11 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   // Ties each visible label to its field (htmlFor and id)
   const fieldId = useId();
   const [formName, setFormName] = useState<string>('');
+  // The rule's trigger count, shown on the editor's reset button
+  const [currentCount, setCurrentCount] = useState<number>(0);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
+  // Shown beside the reset button, which sits at the bottom of a long form
+  const [resetError, setResetError] = useState<string | null>(null);
   const [formRuleType, setFormRuleType] = useState<AlertRuleType>('threshold');
   const [formChannelId, setFormChannelId] = useState<number | null>(null);
   const [formFilterApps, setFormFilterApps] = useState<string[]>([]);
@@ -110,6 +118,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
     setShowDiscardConfirm(false);
     resetSelection();
 
+    setCurrentCount(ruleToEdit?.trigger_count ?? 0);
+    setResetError(null);
     if (ruleToEdit) {
       setFormName(ruleToEdit.name);
       setFormRuleType(ruleToEdit.rule_type);
@@ -236,6 +246,21 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setShowDiscardConfirm(true);
     } else {
       onClose();
+    }
+  };
+
+  const handleResetCounter = async () => {
+    if (!ruleToEdit) return;
+    setIsResetting(true);
+    setResetError(null);
+    try {
+      const updated = await resetAlertRuleCounter(ruleToEdit.id);
+      setCurrentCount(0);
+      onCounterReset?.(updated);
+    } catch (err: any) {
+      setResetError(err.message || 'Failed to reset the counter.');
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -710,7 +735,24 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </label>
         </div>
 
-        <div className="pt-4 border-t border-line flex justify-end gap-2">
+        <div className="pt-4 border-t border-line flex flex-wrap items-center justify-end gap-2">
+          {ruleToEdit && (
+            <Button
+              size="sm"
+              onClick={handleResetCounter}
+              disabled={isResetting || currentCount === 0}
+              icon={<RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />}
+              className="mr-auto"
+              title="Set the count of firings back to 0 (Last triggered stays)"
+            >
+              Reset counter to 0 ({currentCount.toLocaleString()})
+            </Button>
+          )}
+          {resetError && (
+            <p role="alert" className="order-last basis-full text-right text-xs text-danger-300">
+              {resetError}
+            </p>
+          )}
           <button
             type="button"
             onClick={handleCloseAttempt}

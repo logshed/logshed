@@ -2961,6 +2961,42 @@ class TestRateRuleCountsInsteadOfStoring:
         assert counts == [600, 701]
 
     @pytest.mark.asyncio
+    async def test_a_reset_count_is_not_written_back_by_the_next_firing(self, test_db: Path, monkeypatch):
+        # Fires at 60 matches (1 a second over 60 seconds)
+        rule_id = self._insert_rate_rule(test_db, threshold=1, window=60)
+
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        def stored_count() -> int:
+            conn = get_connection(test_db)
+            try:
+                return conn.execute("SELECT trigger_count FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()[0]
+            finally:
+                conn.close()
+
+        evaluator = AlertEvaluator(test_db)
+        now = datetime.now(timezone.utc)
+        for _ in range(3):
+            evaluator._rules[0].suppress_until_epoch = None
+            await self._feed(evaluator, self._storm(60, now - timedelta(seconds=30), 20.0))
+            await evaluator.stop()
+        assert stored_count() == 3
+
+        # The stored count is reset while the evaluator still holds the rule with its count
+        conn = get_connection(test_db)
+        with conn:
+            conn.execute("UPDATE alert_rules SET trigger_count = 0 WHERE id = ?", (rule_id,))
+        conn.close()
+        evaluator._rules[0].suppress_until_epoch = None
+        await self._feed(evaluator, self._storm(60, now - timedelta(seconds=30), 20.0))
+        await evaluator.stop()
+        assert stored_count() == 1
+
+    @pytest.mark.asyncio
     async def test_a_new_threshold_keeps_the_count_and_a_new_window_length_starts_again(self, test_db: Path):
         rule_id = self._insert_rate_rule(test_db, threshold=1000, window=60)
         evaluator = AlertEvaluator(test_db)

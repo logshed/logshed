@@ -28,6 +28,7 @@ const renderTab = (maintenance: MaintenanceWindowResponse) =>
       onOpenEditModal={vi.fn()}
       onDeleteRule={vi.fn()}
       onNavigateToSettings={vi.fn()}
+      onResetAllCounters={vi.fn()}
       getChannelStatus={() => ({ name: '', warning: null, isInvalid: false })}
     />
   );

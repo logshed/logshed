@@ -20,6 +20,7 @@ import {
   exportSingleDropRule,
   importDropRules,
   reorderDropRules,
+  resetAllDropRuleCounters,
 } from '../../../api/dropRules.ts';
 import { fetchLogFacets } from '../../../api/logs.ts';
 import { slugify } from '../../../utils/formatters.ts';
@@ -32,6 +33,7 @@ import { CreateDropRuleModal } from '../CreateDropRuleModal.tsx';
 import { splitPatternList } from '../../../utils/patternList.ts';
 import { DropPresetsModal } from '../DropPresetsModal.tsx';
 import { RuleOrderControls } from '../RuleOrderControls.tsx';
+import { ResetCountersButton } from '../ResetCountersButton.tsx';
 import { useFlash } from '../../../utils/hooks.ts';
 import { buttonClass } from '../../common/Button.tsx';
 import { Card } from '../../common/Card.tsx';
@@ -150,6 +152,17 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
     importRuleFile(e, importDropRules, setFeedbackMsg, loadRules);
 
   const totalDropped = rules.reduce((acc, r) => acc + (r.dropped_count || 0), 0);
+  const countedRules = rules.filter((r) => (r.dropped_count || 0) > 0).length;
+
+  const handleResetAll = async () => {
+    try {
+      await resetAllDropRuleCounters();
+      flashFeedback({ text: 'Every drop rule counter is back to 0.', isError: false });
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to reset the counters.', isError: true });
+    }
+    await loadRules();
+  };
 
   return (
     <Card padding="flush">
@@ -191,6 +204,15 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
             <Zap className="w-3.5 h-3.5 text-accent-500" />
             <span>Presets</span>
           </button>
+
+          <ResetCountersButton
+            ruleNoun="drop rule"
+            ruleCount={countedRules}
+            total={totalDropped}
+            unit={['dropped log', 'dropped logs']}
+            keeps="Logs dropped from now on count from 1."
+            onReset={handleResetAll}
+          />
 
           <button
             type="button"
