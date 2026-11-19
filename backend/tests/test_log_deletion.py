@@ -685,3 +685,55 @@ async def test_delete_accepts_as_many_ids_as_the_console_holds(client: AsyncClie
 
     res = await client.post("/api/logs/delete/preview", json={"sources": [f"host-{i}" for i in range(500)]})
     assert res.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_logs_by_exact_severities(client: AsyncClient, auth_cookie: dict):
+    """Exact severities filter deletes only those levels, leaving worse and better levels intact."""
+    client.cookies = auth_cookie
+    db_path = get_db_path()
+    # Seed mixed severities on pve1 (3=Error, 6=Info, 4=Warning) and pve2 (6=Info, 2=Critical)
+    _seed_test_logs(db_path)
+
+    # Preview Info (6) logs from pve1 only: 1 matching row (Error 3 on pve1 is not matched)
+    preview = await client.post(
+        "/api/logs/delete/preview",
+        json={"sources": ["pve1"], "severities": [6]},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["matched_count"] == 1
+
+    # Delete Info (6) logs from pve1
+    del_res = await client.post(
+        "/api/logs/delete",
+        json={"sources": ["pve1"], "severities": [6]},
+    )
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted_count"] == 1
+
+    # Error on pve1 and Info on pve2 remain
+    remaining = (await client.get("/api/logs")).json()["logs"]
+    assert len(remaining) == 4
+    assert any(r["source_alias"] == "pve1" and r["severity"] == 3 for r in remaining)
+    assert any(r["source_alias"] == "pve2" and r["severity"] == 6 for r in remaining)
+
+    # Multi-severity delete: Warning (4) and Info (6) across all hosts -> 2 rows
+    multi_res = await client.post(
+        "/api/logs/delete",
+        json={"severities": [4, 6]},
+    )
+    assert multi_res.status_code == 200
+    assert multi_res.json()["deleted_count"] == 2
+
+    remaining_after = (await client.get("/api/logs")).json()["logs"]
+    assert sorted(r["severity"] for r in remaining_after) == [2, 3]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_severities", [[-1], [8], [0, 9]])
+async def test_delete_rejects_out_of_range_severities(
+    client: AsyncClient, auth_cookie: dict, bad_severities: list[int]
+):
+    client.cookies = auth_cookie
+    res = await client.post("/api/logs/delete/preview", json={"severities": bad_severities})
+    assert res.status_code == 422

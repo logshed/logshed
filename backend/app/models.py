@@ -4,7 +4,7 @@ Pydantic v2 schemas and models for LogShed API.
 
 import ipaddress
 import re
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from app.core.ai_providers import AI_PROVIDERS, DEFAULT_AI_PROVIDER
@@ -158,6 +158,9 @@ class LogDeleteRequest(BaseModel):
     sources: Optional[list[str]] = Field(None, max_length=500, description="Filter by source_alias or source_ip (multi-value supported, at most 500)")
     apps: Optional[list[str]] = Field(None, max_length=500, description="Filter by app_name (multi-value supported, at most 500)")
     severity_max: Optional[int] = Field(None, ge=0, le=7, description="Max severity (0-7, lower is more severe)")
+    severities: Optional[list[Annotated[int, Field(ge=0, le=7)]]] = Field(
+        None, max_length=8, description="Exact severities to match (0-7, multi-value)"
+    )
     from_: Optional[str] = Field(None, alias="from", description="ISO datetime start filter")
     to: Optional[str] = Field(None, description="ISO datetime end filter")
     query: Optional[str] = Field(None, description="FTS5 search query to filter deletions")

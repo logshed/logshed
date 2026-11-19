@@ -174,4 +174,54 @@ describe('DeleteLogsCard Component', () => {
       process.env.TZ = originalTz;
     }
   });
+
+  it('filters preview and deletion by one or more exact severities and resets them', async () => {
+    const previewSpy = vi.spyOn(logsApi, 'previewDeleteLogs').mockResolvedValue({ matched_count: 12 });
+    const deleteSpy = vi.spyOn(logsApi, 'deleteLogs').mockResolvedValue({
+      status: 'ok',
+      deleted_count: 12,
+      message: 'Deleted 12 logs.',
+    });
+
+    render(<DeleteLogsCard />);
+    await act(async () => {});
+
+    const infoBtn = screen.getByRole('button', { name: 'Info' });
+    const debugBtn = screen.getByRole('button', { name: 'Debug' });
+    expect(infoBtn).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(infoBtn);
+    expect(infoBtn).toHaveAttribute('aria-pressed', 'true');
+
+    await waitFor(() => {
+      expect(previewSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+        severities: [6],
+        delete_all: undefined,
+      }));
+    });
+
+    // Adding Debug and All Time still sends filtered criteria, never delete_all
+    fireEvent.click(debugBtn);
+    fireEvent.click(screen.getByRole('button', { name: 'All Time' }));
+
+    await waitFor(() => {
+      expect(previewSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+        severities: [6, 7],
+        delete_all: undefined,
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete Matching Logs/i }));
+    await waitFor(() => {
+      expect(deleteSpy).toHaveBeenCalledWith(expect.objectContaining({
+        severities: [6, 7],
+        delete_all: undefined,
+      }));
+    });
+
+    // Reset Criteria clears selected severities
+    fireEvent.click(screen.getByRole('button', { name: /Reset Criteria/i }));
+    expect(infoBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(debugBtn).toHaveAttribute('aria-pressed', 'false');
+  });
 });

@@ -111,6 +111,7 @@ class LogFilter:
     sources: tuple[str, ...] = ()
     apps: tuple[str, ...] = ()
     severity_max: Optional[int] = None
+    severities: tuple[int, ...] = ()
     # Stored UTC layout (to_utc_bound), compared as strings
     from_ts: Optional[str] = None
     to_ts: Optional[str] = None
@@ -124,6 +125,7 @@ class LogFilter:
         sources: Optional[list[str]] = None,
         apps: Optional[list[str]] = None,
         severity_max: Optional[int] = None,
+        severities: Optional[list[int]] = None,
         from_: Optional[str] = None,
         to: Optional[str] = None,
         log_ids: Optional[list[int]] = None,
@@ -142,6 +144,7 @@ class LogFilter:
             sources=tuple(parse_multi_values(sources)),
             apps=tuple(parse_multi_values(apps)),
             severity_max=severity_max,
+            severities=tuple(sorted(set(severities))) if severities else (),
             from_ts=from_ts,
             to_ts=to_ts,
             log_ids=tuple(log_ids or ()),
@@ -151,7 +154,7 @@ class LogFilter:
     def is_empty(self) -> bool:
         """True when the filter has no criterion, so it selects every log."""
         return not (
-            self.query or self.sources or self.apps or self.log_ids
+            self.query or self.sources or self.apps or self.log_ids or self.severities
             or self.severity_max is not None or self.from_ts or self.to_ts
         )
 
@@ -185,6 +188,11 @@ def build_where(conn: Optional[sqlite3.Connection], f: LogFilter) -> tuple[str, 
     if f.severity_max is not None:
         where_clauses.append("logs.severity <= :severity_max")
         params["severity_max"] = f.severity_max
+
+    if f.severities:
+        sev_placeholders = ", ".join(f":sev_{i}" for i in range(len(f.severities)))
+        where_clauses.append(f"logs.severity IN ({sev_placeholders})")
+        params.update({f"sev_{i}": s for i, s in enumerate(f.severities)})
 
     if f.from_ts:
         where_clauses.append("logs.timestamp >= :from_ts")
@@ -264,6 +272,11 @@ def build_day_where(f: LogFilter, docker_names: list[str]) -> tuple[str, dict[st
     if f.severity_max is not None:
         where_clauses.append("logs.severity <= :severity_max")
         params["severity_max"] = f.severity_max
+
+    if f.severities:
+        sev_placeholders = ", ".join(f":sev_{i}" for i in range(len(f.severities)))
+        where_clauses.append(f"logs.severity IN ({sev_placeholders})")
+        params.update({f"sev_{i}": s for i, s in enumerate(f.severities)})
 
     if f.from_ts:
         where_clauses.append("logs.ts >= :from_ts")

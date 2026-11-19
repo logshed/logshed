@@ -30,6 +30,7 @@ def deletion_log_filter(criteria: LogDeleteRequest) -> LogFilter:
         sources=criteria.sources,
         apps=criteria.apps,
         severity_max=criteria.severity_max,
+        severities=criteria.severities,
         from_=criteria.from_,
         to=criteria.to,
         log_ids=criteria.log_ids,

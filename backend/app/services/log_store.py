@@ -1093,7 +1093,10 @@ def _catalogue_groups(
     """
     if not part.sealed or part.row_count is None:
         return None
-    if log_filter.query or log_filter.sources or log_filter.apps or log_filter.log_ids or log_filter.severity_max is not None:
+    if (
+        log_filter.query or log_filter.sources or log_filter.apps or log_filter.log_ids
+        or log_filter.severities or log_filter.severity_max is not None
+    ):
         return None
     from_us, to_us = _bound_us(log_filter.from_ts), _bound_us(log_filter.to_ts)
     if (log_filter.from_ts and (from_us is None or part.min_ts is None or from_us > part.min_ts)) or (
@@ -1452,6 +1455,9 @@ def _histogram_from_catalogue(
     if log_filter.severity_max is not None:
         criteria += " AND severity <= ?"
         values.append(log_filter.severity_max)
+    if log_filter.severities:
+        criteria += f" AND severity IN ({', '.join('?' * len(log_filter.severities))})"
+        values.extend(log_filter.severities)
     for column, names in (("host", log_filter.sources), ("app", log_filter.apps)):
         if names:
             criteria += f" AND {column} IN ({', '.join('?' * len(names))})"

@@ -18,6 +18,7 @@ import { useServerTimezone } from '../../utils/hooks.ts';
 import { Button } from '../common/Button.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
 import { TextField } from '../common/Field.tsx';
+import { SEVERITIES } from '../common/SeverityBadge.tsx';
 
 interface DeleteLogsCardProps {
   onLogsDeleted?: () => void;
@@ -28,6 +29,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
   const [availableApps, setAvailableApps] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [selectedApps, setSelectedApps] = useState<string[]>([]);
+  const [selectedSeverities, setSelectedSeverities] = useState<number[]>([]);
   const [timePreset, setTimePreset] = useState<string>('');
   const [customFrom, setCustomFrom] = useState<string>('');
   const [customTo, setCustomTo] = useState<string>('');
@@ -94,6 +96,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
   const hasActiveCriteria =
     selectedSources.length > 0 ||
     selectedApps.length > 0 ||
+    selectedSeverities.length > 0 ||
     timePreset !== '' ||
     Boolean(query.trim());
 
@@ -101,7 +104,14 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
     timePreset === 'all' &&
     selectedSources.length === 0 &&
     selectedApps.length === 0 &&
+    selectedSeverities.length === 0 &&
     !query.trim();
+
+  const toggleSeverity = (value: number) => {
+    setSelectedSeverities((prev) =>
+      prev.includes(value) ? prev.filter((s) => s !== value) : [...prev, value].sort((a, b) => a - b)
+    );
+  };
 
   const isHighRisk = isAllLogsTargeted || (matchedCount !== null && matchedCount >= 500);
 
@@ -119,6 +129,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
       const res = await previewDeleteLogs({
         sources: selectedSources.length > 0 ? selectedSources : undefined,
         apps: selectedApps.length > 0 ? selectedApps : undefined,
+        severities: selectedSeverities.length > 0 ? selectedSeverities : undefined,
         from: derivedFrom,
         to: derivedTo,
         query: query.trim() || undefined,
@@ -131,7 +142,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
     } finally {
       setIsPreviewLoading(false);
     }
-  }, [selectedSources, selectedApps, derivedFrom, derivedTo, query, isAllLogsTargeted, hasActiveCriteria]);
+  }, [selectedSources, selectedApps, selectedSeverities, derivedFrom, derivedTo, query, isAllLogsTargeted, hasActiveCriteria]);
 
   useEffect(() => {
     if (!hasActiveCriteria) {
@@ -148,6 +159,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
   const handleResetFilters = () => {
     setSelectedSources([]);
     setSelectedApps([]);
+    setSelectedSeverities([]);
     setTimePreset('');
     setCustomFrom('');
     setCustomTo('');
@@ -174,6 +186,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
       const res = await deleteLogs({
         sources: selectedSources.length > 0 ? selectedSources : undefined,
         apps: selectedApps.length > 0 ? selectedApps : undefined,
+        severities: selectedSeverities.length > 0 ? selectedSeverities : undefined,
         from: derivedFrom,
         to: derivedTo,
         query: query.trim() || undefined,
@@ -209,7 +222,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
       <CardHeader
         icon={<Trash2 />}
         title="Targeted Log Deletion"
-        description="Permanently delete specific logs by host, application, time period, or text search query. Deleted logs are purged from the database and search index."
+        description="Permanently delete specific logs by host, application, severity, time period, or text search query. Deleted logs are purged from the database and search index."
       />
 
       {/* Messages */}
@@ -261,6 +274,34 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
               allowCustomInput={true}
               variant="form"
             />
+          </div>
+        </div>
+
+        {/* Severity Multi-Select Pills */}
+        <div className="space-y-1.5 min-w-0">
+          <span className="text-fg-soft font-medium flex items-center gap-1.5 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5 text-accent-500" />
+            <span>Severity (Optional, exact levels)</span>
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5 w-full min-w-0">
+            {SEVERITIES.map((sev) => {
+              const isSelected = selectedSeverities.includes(sev.value);
+              return (
+                <button
+                  key={sev.value}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => toggleSeverity(sev.value)}
+                  className={`px-2.5 py-0.5 rounded text-[11px] font-mono transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-accent-700 text-on-fill font-semibold shadow-xs'
+                      : 'bg-canvas text-fg-muted hover:text-fg hover:bg-raised border border-line'
+                  }`}
+                >
+                  {sev.name}
+                </button>
+              );
+            })}
           </div>
         </div>
 

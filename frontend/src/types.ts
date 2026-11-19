@@ -29,6 +29,7 @@ export interface LogDeleteParams {
   sources?: string[];
   apps?: string[];
   severity_max?: number;
+  severities?: number[];
   from?: string;
   to?: string;
   query?: string;
