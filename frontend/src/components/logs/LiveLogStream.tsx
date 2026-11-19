@@ -385,7 +385,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const hiddenPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filtersToRef = useRef<string | undefined>(filters.to);
   filtersToRef.current = filters.to;
-  const { loadInitialLogs } = buffer;
+  const { catchUpLiveLogs } = buffer;
 
   // Connect to SSE stream
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -414,10 +414,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       } else {
         clearHiddenTimer();
         if (streamPausedForHiddenRef.current) {
-          setStreamPausedForHidden(false);
-          if (!filtersToRef.current && isAutoScrollRef.current) {
-            loadInitialLogs();
-          }
+          // Add the logs missed while hidden first, then reconnect, so live rows stay in time order
+          const resume = () => setStreamPausedForHidden(false);
+          if (filtersToRef.current) resume();
+          else void catchUpLiveLogs().finally(resume);
         }
       }
     };
@@ -436,11 +436,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const onPageShow = (e: PageTransitionEvent) => {
       if (!e.persisted || filtersToRef.current || eventSourceRef.current) return;
       clearHiddenTimer();
-      setStreamPausedForHidden(false);
-      setStreamReconnectNonce((n) => n + 1);
-      if (isAutoScrollRef.current) {
-        loadInitialLogs();
-      }
+      void catchUpLiveLogs().finally(() => {
+        setStreamPausedForHidden(false);
+        setStreamReconnectNonce((n) => n + 1);
+      });
     };
     if (document.visibilityState === 'hidden') {
       scheduleHiddenPause();
@@ -454,7 +453,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
     };
-  }, [isAutoScrollRef, loadInitialLogs]);
+  }, [catchUpLiveLogs]);
 
   useEffect(() => {
     if (eventSourceRef.current) {

@@ -17,6 +17,8 @@ export const LIVE_BUFFER_SIZE = 3000;
 export const SCROLLBACK_BUFFER_SIZE = 20000;
 // Logs per history page
 const PAGE_SIZE = 500;
+// Pages of logs fetched at most when the live stream resumes, looking for the newest row already listed
+const MAX_CATCH_UP_PAGES = 10;
 const BATCH_FLUSH_INTERVAL_MS = 100;
 // How long after the last scroll event (or a finger lifting) scrolling counts as stopped
 const SCROLL_IDLE_MS = 150;
@@ -126,6 +128,9 @@ export function useLogBuffer({
   // Set when held rows were dropped (the scrollback buffer was full): they then wait for auto-scroll to
   // resume, because joining them to the list would leave a gap
   const heldRowsDroppedRef = useRef<boolean>(false);
+  // Set when more logs arrived during a stream pause than a catch-up could join without a gap: the
+  // list reloads once auto-scroll resumes
+  const reloadOnResumeRef = useRef<boolean>(false);
   // Set by the Paused and jump-to-top buttons while the smooth scroll to the top runs, so its scroll
   // events do not pause auto-scroll again on the way up
   const resumingToTopRef = useRef<boolean>(false);
@@ -333,6 +338,7 @@ export function useLogBuffer({
     try {
       setIsLoadingHistory(true);
       historicalOffsetRef.current = 0;
+      reloadOnResumeRef.current = false;
       setLoadError(null);
       setHasMoreLogs(true);
       dropPendingLiveLogs();
@@ -378,6 +384,65 @@ export function useLogBuffer({
       }
     }
   }, [filters, onLogsReceived, onFirstPage, prepareRows, dropPendingLiveLogs, selectionAnchor]);
+
+  /**
+   * Adds the logs that arrived while the live stream was paused (a hidden tab). With auto-scroll on
+   * the list simply reloads. Scrolled back, the missed logs go through the live path, so the list keeps
+   * its place and counts them in the "N new" banner: pages are fetched until one meets a row already
+   * listed. If none does, joining them would leave a gap, so they are only counted and the list
+   * reloads once auto-scroll resumes. Resolves when done, so the stream can reconnect after it.
+   */
+  const catchUpLiveLogs = useCallback(async () => {
+    if (isAutoScrollRef.current || logsRef.current.length === 0) {
+      await loadInitialLogs();
+      return;
+    }
+    const reqId = fetchRequestIdRef.current;
+    const listed = new Set(logsRef.current.map((l) => l.id));
+    const missed: LogEntry[] = [];
+    const seen = new Set<number>();
+    let joined = false;
+    try {
+      for (let page = 0; page < MAX_CATCH_UP_PAGES && !joined; page += 1) {
+        const res = await fetchLogs({
+          ...filters,
+          limit: PAGE_SIZE,
+          offset: page * PAGE_SIZE,
+        }, { signal: fetchAbortRef.current?.signal });
+        // A filter change or reload while fetching replaced the list
+        if (reqId !== fetchRequestIdRef.current) return;
+        for (const log of res.logs) {
+          if (listed.has(log.id)) {
+            joined = true;
+            break;
+          }
+          if (!seen.has(log.id)) {
+            seen.add(log.id);
+            missed.push(log);
+          }
+        }
+        // Fewer than a page: every stored log has been seen
+        if (res.logs.length < PAGE_SIZE) joined = true;
+      }
+    } catch (err) {
+      if (reqId === fetchRequestIdRef.current) console.error('Failed to catch up on live logs', err);
+      return;
+    }
+    if (!joined) {
+      reloadOnResumeRef.current = true;
+      setMissedLogsCount((prev) => prev + missed.length);
+      return;
+    }
+    // Oldest first, as the stream delivers them
+    for (let i = missed.length - 1; i >= 0; i -= 1) queueLiveLog(missed[i]);
+  }, [filters, loadInitialLogs, logsRef, queueLiveLog]);
+
+  // Logs missed during a stream pause that could not join the list: reload once auto-scroll resumes
+  useEffect(() => {
+    if (!autoScroll || !reloadOnResumeRef.current) return;
+    reloadOnResumeRef.current = false;
+    loadInitialLogs();
+  }, [autoScroll, loadInitialLogs]);
 
   const loadMoreLogs = useCallback(async () => {
     if (isLoadingMoreRef.current || !hasMoreLogs || isLoadingHistory) return;
@@ -533,6 +598,7 @@ export function useLogBuffer({
     fetchRequestIdRef.current += 1;
     fetchAbortRef.current?.abort();
     dropPendingLiveLogs();
+    reloadOnResumeRef.current = false;
     pendingScrollAdjustmentRef.current = 0;
     setLogs([]);
     setMissedLogsCount(0);
@@ -560,6 +626,7 @@ export function useLogBuffer({
     anchoredScrollTopRef,
     resumingToTopRef,
     loadInitialLogs,
+    catchUpLiveLogs,
     loadMoreLogs,
     applyFiltersNow,
     queueLiveLog,

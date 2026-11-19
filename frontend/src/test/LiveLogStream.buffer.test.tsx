@@ -3,6 +3,7 @@ import { screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { MOBILE_LOG_ROW_HEIGHT, DESKTOP_LOG_ROW_HEIGHT } from '../components/logs/LogRow.tsx';
 import * as logsApi from '../api/logs.ts';
+import { SSE_HIDDEN_PAUSE_MS } from '../components/logs/LiveLogStream.tsx';
 import { LogEntry } from '../types.ts';
 import { MockEventSource, virtualizerControl, sampleLogs, setupStreamMocks } from './liveLogStreamSetup.tsx';
 
@@ -360,5 +361,106 @@ describe('Console buffer and live rows', () => {
     await waitFor(() => expect(signals.length).toBe(2));
     expect(signals[0].aborted).toBe(true);
     expect(signals[1].aborted).toBe(false);
+  });
+
+  describe('logs that arrive while a hidden tab has paused the stream', () => {
+    const missedLog = (id: number): LogEntry => ({
+      ...sampleLogs[0],
+      id,
+      timestamp: new Date(Date.UTC(2026, 8, 3, 15, 0, 0) + id).toISOString(),
+      message: `Missed while hidden ${id}`,
+    });
+
+    // Scrolled back 200px (auto-scroll paused), hidden past the pause, then visible again
+    const scrollBackHideAndReturn = async (beforeReturn: () => void) => {
+      const scroller = document.querySelector('.overflow-y-auto') as HTMLElement;
+      let top = 200;
+      Object.defineProperty(scroller, 'scrollTop', { get: () => top, set: (v: number) => { top = v; }, configurable: true });
+      Object.defineProperty(scroller, 'scrollHeight', { get: () => 10000, configurable: true });
+      Object.defineProperty(scroller, 'clientHeight', { get: () => 500, configurable: true });
+      fireEvent.scroll(scroller);
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SSE_HIDDEN_PAUSE_MS + 500);
+      });
+      const streamsWhileHidden = MockEventSource.instances.length;
+      beforeReturn();
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      return {
+        streamsWhileHidden,
+        scrollTop: () => top,
+        toTop: () => { top = 0; fireEvent.scroll(scroller); },
+      };
+    };
+
+    it('adds them at the top of a scrolled-back list, counted in the banner, before reconnecting', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        renderStream();
+        await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+        const ret = await scrollBackHideAndReturn(() => {
+          vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({
+            logs: [missedLog(203), missedLog(202), missedLog(201), ...sampleLogs],
+            total: sampleLogs.length + 3,
+            limit: 500,
+            offset: 0,
+          });
+        });
+        await waitFor(() => expect(screen.getByText(/3 new logs at top/)).toBeInTheDocument());
+        const rows = document.querySelectorAll('.log-row');
+        expect(rows.length).toBe(7);
+        expect(rows[0]).toHaveTextContent('Missed while hidden 203');
+        expect(rows[3]).toHaveTextContent('Nginx upstream connection timeout');
+        // The rows in view stay put: the list moves down by the added rows
+        await waitFor(() => expect(ret.scrollTop()).toBe(200 + 3 * DESKTOP_LOG_ROW_HEIGHT));
+        await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(ret.streamsWhileHidden));
+      } finally {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+        vi.useRealTimers();
+      }
+    });
+
+    it('counts them and reloads when auto-scroll resumes, when too many arrived to join the list', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        renderStream();
+        await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+        let fetchSpy: ReturnType<typeof vi.spyOn> | null = null;
+        const ret = await scrollBackHideAndReturn(() => {
+          // Every page is newer than the list: no page meets a listed row
+          fetchSpy = vi.spyOn(logsApi, 'fetchLogs').mockImplementation(async (params: any) => {
+            const offset = params.offset ?? 0;
+            return {
+              logs: Array.from({ length: 500 }, (_, i) => missedLog(100000 - offset - i)),
+              total: 100000,
+              limit: 500,
+              offset,
+            };
+          });
+          fetchSpy.mockClear();
+        });
+        await waitFor(() => expect(screen.getByText(/5000 new logs at top/)).toBeInTheDocument());
+        expect(fetchSpy!).toHaveBeenCalledTimes(10);
+        // Nothing joined the list, so it has no gap
+        expect(document.querySelectorAll('.log-row').length).toBe(4);
+        await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(ret.streamsWhileHidden));
+
+        // Back at the top: the list reloads with the newest logs
+        ret.toTop();
+        await waitFor(() => expect(fetchSpy!).toHaveBeenCalledTimes(11));
+        await waitFor(() => expect(screen.getByText('Missed while hidden 100000')).toBeInTheDocument());
+      } finally {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+        vi.useRealTimers();
+      }
+    });
   });
 });

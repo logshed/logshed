@@ -615,7 +615,8 @@ describe('LiveLogStream loading, connection and selection', () => {
       await act(async () => {
         document.dispatchEvent(new Event('visibilitychange'));
       });
-      expect(MockEventSource.instances.length).toBeGreaterThan(countBeforeReturn);
+      // After the missed logs are fetched
+      await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(countBeforeReturn));
       expect(fetchSpy.mock.calls.length).toBeGreaterThan(initialFetches);
     } finally {
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
