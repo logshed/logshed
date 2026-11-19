@@ -1,5 +1,6 @@
-import React from 'react';
-import { Bookmark, Box, ChartColumn, Clock, Download, Pause, Play, Server, Trash2 } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Bookmark, Box, ChartColumn, Clock, Download, Pause, Play, Server, Trash2, X } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
 import { buttonClass, IconButton } from '../common/Button.tsx';
@@ -36,6 +37,9 @@ interface StreamToolbarProps {
   /** Whether the volume histogram shows above the list */
   histogramShown: boolean;
   onToggleHistogram: () => void;
+  /** One-time first-load callout highlighting the chart button */
+  showHistogramCallout?: boolean;
+  onDismissHistogramCallout?: () => void;
 }
 
 /**
@@ -67,7 +71,42 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
   onDownload,
   histogramShown,
   onToggleHistogram,
-}) => (
+  showHistogramCallout = false,
+  onDismissHistogramCallout,
+}) => {
+  const chartBtnRef = useRef<HTMLButtonElement>(null);
+  const [calloutPos, setCalloutPos] = useState<{ top: number; right: number; arrowRight: number } | null>(null);
+  const calloutVisible = showHistogramCallout && !histogramShown;
+
+  useLayoutEffect(() => {
+    if (!calloutVisible) {
+      setCalloutPos(null);
+      return;
+    }
+    const updatePosition = () => {
+      const btn = chartBtnRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const rightEdge = Math.max(12, window.innerWidth - rect.right);
+      const btnCenterFromRight = window.innerWidth - (rect.left + rect.width / 2);
+      const arrowRight = Math.max(12, Math.min(200, btnCenterFromRight - rightEdge - 5));
+      setCalloutPos({ top: rect.bottom + 8, right: rightEdge, arrowRight });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    return () => window.removeEventListener('resize', updatePosition);
+  }, [calloutVisible]);
+
+  useEffect(() => {
+    if (!calloutVisible || !onDismissHistogramCallout) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onDismissHistogramCallout();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [calloutVisible, onDismissHistogramCallout]);
+
+  return (
   <>
     {/* Left: Quick Filter Pills */}
     <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
@@ -213,15 +252,18 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
 
       {/* Sized as the auto-scroll button beside it (not IconButton, whose phone tap size is taller) */}
       <button
+        ref={chartBtnRef}
         type="button"
         onClick={onToggleHistogram}
         aria-pressed={histogramShown}
         aria-label={histogramShown ? 'Hide the log volume chart' : 'Show the log volume chart'}
         title={histogramShown ? 'Hide the log volume chart' : 'Show the log volume chart'}
-        className={`flex items-center px-1.5 py-1 rounded text-xs border transition cursor-pointer ${
+        className={`relative flex items-center px-1.5 py-1 rounded text-xs border transition cursor-pointer ${
           histogramShown
             ? 'bg-raised text-accent-400 border-accent-800 hover:bg-raised-strong'
-            : 'text-fg-muted border-line hover:text-fg hover:bg-raised'
+            : calloutVisible
+              ? 'bg-accent-950/70 text-accent-300 border-accent-500 hover:bg-accent-950'
+              : 'text-fg-muted border-line hover:text-fg hover:bg-raised'
         }`}
       >
         {/* A line box as tall as the auto-scroll button's text, around the icon */}
@@ -229,6 +271,47 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
           <ChartColumn className="w-3.5 h-3.5" />
         </span>
       </button>
+
+      {calloutVisible && calloutPos && createPortal(
+        <div
+          role="status"
+          data-testid="histogram-callout"
+          style={{ top: calloutPos.top, right: calloutPos.right }}
+          className="fixed z-40 w-60 rounded-lg border border-accent-600/80 bg-surface p-2.5 text-left shadow-lg"
+        >
+          <div
+            aria-hidden="true"
+            style={{ right: calloutPos.arrowRight }}
+            className="absolute -top-1.5 size-2.5 rotate-45 border-l border-t border-accent-600/80 bg-surface"
+          />
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-1 text-xs">
+              <div className="font-semibold text-fg-strong">New: Log volume chart</div>
+              <p className="text-[11px] leading-snug text-fg-muted">
+                See log counts by severity over time and click any bar to zoom in.
+              </p>
+              <button
+                type="button"
+                onClick={onToggleHistogram}
+                className="text-[11px] font-medium text-accent-300 hover:text-accent-200 underline cursor-pointer focus-visible:outline-2 focus-visible:outline-accent-500"
+              >
+                Show chart
+              </button>
+            </div>
+            {onDismissHistogramCallout && (
+              <button
+                type="button"
+                onClick={onDismissHistogramCallout}
+                aria-label="Dismiss new chart notice"
+                className="shrink-0 rounded-sm p-0.5 text-fg-muted hover:text-fg hover:bg-raised cursor-pointer focus-visible:outline-2 focus-visible:outline-accent-500"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* Left out on phones to leave room for the quick filters */}
       {!isMobile && (
@@ -248,4 +331,5 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
       )}
     </div>
   </>
-);
+  );
+};

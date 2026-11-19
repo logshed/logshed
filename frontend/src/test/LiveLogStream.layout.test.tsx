@@ -1,6 +1,6 @@
 // Layout on desktop and phones, timestamps, and the empty-list states.
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LiveLogStream } from '../components/logs/LiveLogStream.tsx';
 import { onboardingLoggerCommand } from '../components/logs/ConsoleEmptyState.tsx';
 import { formatStreamTimestamp } from '../utils/formatters.ts';
@@ -298,6 +298,42 @@ describe('Console empty states', () => {
       } finally {
         window.history.replaceState(null, '', '/');
       }
+    });
+  });
+
+  describe('first-load log volume chart callout', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    it('shows the one-time callout on first load and remembers dismissal', async () => {
+      const { unmount } = renderStream();
+      expect(await screen.findByTestId('histogram-callout')).toBeInTheDocument();
+      expect(screen.getByText('New: Log volume chart')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss new chart notice' }));
+      expect(screen.queryByTestId('histogram-callout')).not.toBeInTheDocument();
+
+      // Remounting does not show the callout again
+      unmount();
+      renderStream();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Show the log volume chart' })).toBeInTheDocument());
+      expect(screen.queryByTestId('histogram-callout')).not.toBeInTheDocument();
+    });
+
+    it('opens the chart and clears the callout when clicking the chart button', async () => {
+      vi.spyOn(logsApi, 'fetchLogHistogram').mockResolvedValue({
+        range_from: '2026-03-28T11:00:00+00:00',
+        range_to: '2026-03-28T12:00:00+00:00',
+        bucket_seconds: 1800,
+        buckets: [],
+      });
+      renderStream();
+      expect(await screen.findByTestId('histogram-callout')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show the log volume chart' }));
+      expect(screen.queryByTestId('histogram-callout')).not.toBeInTheDocument();
+      expect(screen.getByTestId('volume-histogram')).toBeInTheDocument();
     });
   });
 });

@@ -64,6 +64,8 @@ import { useAlias } from '../../context/AliasContext.tsx';
 
 // Whether the volume histogram shows, remembered by this browser
 const HISTOGRAM_PREF = 'console.histogram.v1';
+// Whether the one-time first-load callout for the log volume chart has been seen
+export const HISTOGRAM_HINT_SEEN_PREF = 'console.histogram.hintSeen.v1';
 
 // Loaded on first use, not with the Console
 const CreateDropRuleModal = React.lazy(() =>
@@ -291,7 +293,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [histogramShown, setHistogramShown] = useState<boolean>(
     () => readBrowserPref(HISTOGRAM_PREF, (v) => (typeof v === 'boolean' ? v : null)) ?? false,
   );
+  // One-time callout on first load when the chart has never been toggled or dismissed in this browser
+  const [showHistogramCallout, setShowHistogramCallout] = useState<boolean>(() => {
+    const savedShown = readBrowserPref(HISTOGRAM_PREF, (v) => (typeof v === 'boolean' ? v : null));
+    const seen = readBrowserPref(HISTOGRAM_HINT_SEEN_PREF, (v) => (typeof v === 'boolean' ? v : null));
+    return savedShown === null && seen !== true;
+  });
+  const dismissHistogramCallout = useCallback(() => {
+    setShowHistogramCallout(false);
+    writeBrowserPref(HISTOGRAM_HINT_SEEN_PREF, true);
+  }, []);
   const toggleHistogram = useCallback(() => {
+    setShowHistogramCallout(false);
+    writeBrowserPref(HISTOGRAM_HINT_SEEN_PREF, true);
     setHistogramShown((shown) => {
       writeBrowserPref(HISTOGRAM_PREF, !shown);
       return !shown;
@@ -782,6 +796,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       onDownload={() => setDownloadScope('search')}
       histogramShown={histogramShown}
       onToggleHistogram={toggleHistogram}
+      showHistogramCallout={showHistogramCallout}
+      onDismissHistogramCallout={dismissHistogramCallout}
     />
   );
 
