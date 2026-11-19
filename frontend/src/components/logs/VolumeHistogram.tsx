@@ -198,6 +198,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
   const [touchUsed, setTouchUsed] = useState(false);
   // The bar a tap pinned (its start), shown in a box that zooms when tapped
   const [pinnedStart, setPinnedStart] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   // The chart's width, which sets the bars' width (Recharts takes it from the gaps between bars,
   // which a lone bar does not have, so it drew none)
   const [chartWidth, setChartWidth] = useState(0);
@@ -275,6 +276,30 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
     };
   }, [key, live]);
 
+  // Clear any pinned touch tooltip when the filters change
+  useEffect(() => {
+    setPinnedStart(null);
+  }, [key]);
+
+  // Dismiss the pinned touch tooltip when tapping anywhere outside the chart/box or pressing Escape
+  useEffect(() => {
+    if (pinnedStart === null) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setPinnedStart(null);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPinnedStart(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [pinnedStart]);
+
   const bucketMs = data ? data.bucket_seconds * 1000 : 0;
   const bars = useMemo(() => (data ? data.buckets.map((b, i, all) => toBar(b, i, all, bucketMs)) : []), [data, bucketMs]);
   const shownBars = useMemo(
@@ -328,7 +353,8 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
     // A finger that moved was scrolling, not tapping
     if (e.pointerType !== 'touch' || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_SLOP_PX) return;
     const bar = barAt(e.clientX, e.currentTarget);
-    if (bar) setPinnedStart(bar.start);
+    if (bar) setPinnedStart((prev) => (prev === bar.start ? null : bar.start));
+    else setPinnedStart(null);
   };
   let hint: string | null = null;
   if (data && !canZoom && !stale) hint = '1-second bars, the smallest';
@@ -343,7 +369,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
 
   return (
     // Its own layer, so a bar's tooltip shows over the log list below instead of under it
-    <div className="relative z-10 shrink-0 bg-surface border-b border-line px-3 pt-1 pb-0.5 select-none" data-testid="volume-histogram">
+    <div ref={containerRef} className="relative z-10 shrink-0 bg-surface border-b border-line px-3 pt-1 pb-0.5 select-none" data-testid="volume-histogram">
       <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-fg-muted">
         <span>
           {caption}

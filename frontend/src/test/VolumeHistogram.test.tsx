@@ -151,6 +151,40 @@ describe('VolumeHistogram', () => {
     expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
   });
 
+  it('closes the pinned touch tooltip when tapping outside, tapping the same bar again, or pressing Escape', async () => {
+    render(
+      <div>
+        <VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={vi.fn()} />
+        <button type="button">Log row outside</button>
+      </div>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+
+    // Pin the first bar
+    fireEvent.pointerDown(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    fireEvent.pointerUp(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    expect(screen.getByRole('button', { name: /Tap here to zoom in/ })).toBeInTheDocument();
+
+    // Tapping outside (e.g. a log row) dismisses the pinned box
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Log row outside' }), { pointerType: 'touch' });
+    expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
+
+    // Pin again, then tap the same bar to toggle it off
+    fireEvent.pointerDown(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    fireEvent.pointerUp(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    expect(screen.getByRole('button', { name: /Tap here to zoom in/ })).toBeInTheDocument();
+    fireEvent.pointerDown(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    fireEvent.pointerUp(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
+
+    // Pin again, then press Escape to dismiss
+    fireEvent.pointerDown(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    fireEvent.pointerUp(chartBox(), { pointerType: 'touch', clientX: 200, clientY: 30 });
+    expect(screen.getByRole('button', { name: /Tap here to zoom in/ })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
+  });
+
   it('does not take a finger that moves over the chart for a tap', async () => {
     render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
