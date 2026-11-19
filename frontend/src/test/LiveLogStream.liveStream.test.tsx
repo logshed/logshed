@@ -558,16 +558,28 @@ describe('LiveLogStream loading, connection and selection', () => {
     }
   });
 
-  it('closes the live stream immediately on pagehide', async () => {
+  it('closes the live stream immediately on pagehide and reconnects on bfcache pageshow', async () => {
+    const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
     renderStream();
     await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
     const es = MockEventSource.instances[0];
     const closeSpy = vi.spyOn(es, 'close');
+    const fetchesBefore = fetchSpy.mock.calls.length;
     expect(closeSpy).not.toHaveBeenCalled();
     act(() => {
       window.dispatchEvent(new Event('pagehide'));
     });
     expect(closeSpy).toHaveBeenCalled();
+
+    // Returning from bfcache (persisted=true) reconnects SSE and refreshes the top rows
+    const countBeforeShow = MockEventSource.instances.length;
+    const pageshow = new Event('pageshow') as PageTransitionEvent;
+    Object.defineProperty(pageshow, 'persisted', { value: true });
+    act(() => {
+      window.dispatchEvent(pageshow);
+    });
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(countBeforeShow));
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(fetchesBefore);
   });
 
   it('pauses the live stream after 30s in a hidden tab, then reconnects and refreshes on return', async () => {

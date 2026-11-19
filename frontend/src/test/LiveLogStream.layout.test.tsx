@@ -335,5 +335,12 @@ describe('Console empty states', () => {
       expect(screen.queryByTestId('histogram-callout')).not.toBeInTheDocument();
       expect(screen.getByTestId('volume-histogram')).toBeInTheDocument();
     });
+
+    it('dismisses the callout on Escape when no dialog is open', async () => {
+      renderStream();
+      expect(await screen.findByTestId('histogram-callout')).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByTestId('histogram-callout')).not.toBeInTheDocument();
+    });
   });
 });

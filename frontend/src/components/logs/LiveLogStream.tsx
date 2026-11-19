@@ -357,12 +357,18 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   useEffect(() => {
     const onPopState = () => {
       const parsed = withHostAppLists(parseFiltersFromUrl());
+      const curFrom = filtersRef.current.from;
+      const curTo = filtersRef.current.to;
       setFilters(parsed);
-      setZoomHistory((prev) =>
-        prev.length > 0 && prev[prev.length - 1].from === parsed.from && prev[prev.length - 1].to === parsed.to
-          ? prev.slice(0, -1)
-          : [],
-      );
+      setZoomHistory((prev) => {
+        if (parsed.from === curFrom && parsed.to === curTo) return prev;
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          if (prev[i].from === parsed.from && prev[i].to === parsed.to) {
+            return prev.slice(0, i);
+          }
+        }
+        return [];
+      });
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -426,15 +432,27 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         eventSourceRef.current = null;
       }
     };
+    // Reconnect SSE if the browser restores this page from bfcache after pagehide closed it
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted || filtersToRef.current || eventSourceRef.current) return;
+      clearHiddenTimer();
+      setStreamPausedForHidden(false);
+      setStreamReconnectNonce((n) => n + 1);
+      if (isAutoScrollRef.current) {
+        loadInitialLogs();
+      }
+    };
     if (document.visibilityState === 'hidden') {
       scheduleHiddenPause();
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
     return () => {
       clearHiddenTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, [isAutoScrollRef, loadInitialLogs]);
 

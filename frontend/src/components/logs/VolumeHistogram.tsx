@@ -6,6 +6,7 @@ import { ApiError } from '../../api/client.ts';
 import { LogFilterParams } from '../../types.ts';
 import { DAY_MS, buildTimeTicks, formatTimePoint, formatTimeTick } from '../../utils/timeAxis.ts';
 import { readBrowserPref, writeBrowserPref } from '../../utils/browserPrefs.ts';
+import { openDialogCount } from '../../utils/dialogStack.ts';
 
 // Filter edits wait as long as the list's search does, so typing sends one request
 export const HISTOGRAM_DEBOUNCE_MS = 300;
@@ -301,7 +302,9 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({
       }
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPinnedStart(null);
+      if (e.key === 'Escape' && !e.defaultPrevented && openDialogCount() === 0) {
+        setPinnedStart(null);
+      }
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown);
@@ -381,7 +384,7 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({
   return (
     // Its own layer, so a bar's tooltip shows over the log list below instead of under it
     <div ref={containerRef} className="relative z-10 shrink-0 bg-surface border-b border-line px-3 pt-1 pb-0.5 select-none" data-testid="volume-histogram">
-      <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-fg-muted">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] font-mono text-fg-muted">
         <span>
           {caption}
           {data && <span className="text-fg">: {total.toLocaleString()}</span>}

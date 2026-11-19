@@ -5,6 +5,7 @@ import { LogFilterParams, SavedView } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
 import { buttonClass, IconButton } from '../common/Button.tsx';
 import { HostName, selfReportedTitle } from './HostName.tsx';
+import { openDialogCount } from '../../utils/dialogStack.ts';
 
 interface StreamToolbarProps {
   isMobile: boolean;
@@ -94,13 +95,25 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
     };
     updatePosition();
     window.addEventListener('resize', updatePosition);
-    return () => window.removeEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(updatePosition);
+      ro.observe(document.documentElement);
+    }
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+      ro?.disconnect();
+    };
   }, [calloutVisible]);
 
   useEffect(() => {
     if (!calloutVisible || !onDismissHistogramCallout) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onDismissHistogramCallout();
+      if (e.key === 'Escape' && !e.defaultPrevented && openDialogCount() === 0) {
+        onDismissHistogramCallout();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -274,7 +287,8 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
 
       {calloutVisible && calloutPos && createPortal(
         <div
-          role="status"
+          role="region"
+          aria-label="New: Log volume chart"
           data-testid="histogram-callout"
           style={{ top: calloutPos.top, right: calloutPos.right }}
           className="fixed z-40 w-60 rounded-lg border border-accent-600/80 bg-surface p-2.5 text-left shadow-lg"

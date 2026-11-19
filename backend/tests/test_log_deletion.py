@@ -737,3 +737,82 @@ async def test_delete_rejects_out_of_range_severities(
     client.cookies = auth_cookie
     res = await client.post("/api/logs/delete/preview", json={"severities": bad_severities})
     assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_delete_by_exact_severities_across_sealed_day_file(client: AsyncClient, auth_cookie: dict):
+    """Exact severities filter works on sealed day files (skipping catalogue whole-file shortcut) and combined with severity_max."""
+    from app.core import day_files
+    from app.services import day_store, log_store
+    from app.services.fts_indexer import index_pending_logs
+
+    client.cookies = auth_cookie
+    db_path = get_db_path()
+    conn = get_connection(db_path)
+    try:
+        # Insert 3 logs into a past UTC day file (2026-09-01), index and seal it
+        past_day = "2026-09-01"
+        log_store.insert_rows(
+            conn,
+            [
+                {
+                    "timestamp": f"{past_day}T10:00:00+00:00",
+                    "received_at": f"{past_day}T10:00:00+00:00",
+                    "source_ip": "10.0.0.5",
+                    "source_alias": "opnsense",
+                    "app_name": "filterlog",
+                    "facility": 1,
+                    "severity": 6,
+                    "message": "info packet",
+                    "raw": "info packet",
+                },
+                {
+                    "timestamp": f"{past_day}T10:01:00+00:00",
+                    "received_at": f"{past_day}T10:01:00+00:00",
+                    "source_ip": "10.0.0.5",
+                    "source_alias": "opnsense",
+                    "app_name": "filterlog",
+                    "facility": 1,
+                    "severity": 3,
+                    "message": "error packet",
+                    "raw": "error packet",
+                },
+                {
+                    "timestamp": f"{past_day}T10:02:00+00:00",
+                    "received_at": f"{past_day}T10:02:00+00:00",
+                    "source_ip": "10.0.0.5",
+                    "source_alias": "opnsense",
+                    "app_name": "filterlog",
+                    "facility": 1,
+                    "severity": 7,
+                    "message": "debug packet",
+                    "raw": "debug packet",
+                },
+            ],
+        )
+        index_pending_logs(db_path)
+        sealed = day_store.seal_finished_days(conn, now_us=day_files.day_start_us("2026-09-03"))
+        assert past_day in sealed
+    finally:
+        conn.close()
+
+    # Empty severities list with no other criteria is rejected (400)
+    empty_res = await client.post("/api/logs/delete/preview", json={"severities": []})
+    assert empty_res.status_code == 400
+
+    # Preview only Info (6) on the sealed day file must count 1, not all 3 from the catalogue
+    preview = await client.post("/api/logs/delete/preview", json={"severities": [6]})
+    assert preview.status_code == 200
+    assert preview.json()["matched_count"] == 1
+
+    # Combining severities=[3, 6] with severity_max=4 narrows to Error (3) only
+    combined = await client.post("/api/logs/delete/preview", json={"severities": [3, 6], "severity_max": 4})
+    assert combined.status_code == 200
+    assert combined.json()["matched_count"] == 1
+
+    # Delete Info (6) from the sealed day file; Error (3) and Debug (7) stay
+    del_res = await client.post("/api/logs/delete", json={"severities": [6]})
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted_count"] == 1
+    remaining = (await client.get("/api/logs")).json()["logs"]
+    assert sorted(r["severity"] for r in remaining) == [3, 7]
