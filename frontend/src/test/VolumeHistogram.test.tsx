@@ -132,6 +132,22 @@ describe('VolumeHistogram', () => {
     expect(onZoom).toHaveBeenLastCalledWith('2026-03-28T11:30:00.000Z', '2026-03-28T11:59:59.999Z');
   });
 
+  it('shows the Zoom out button only when canZoomOut is true and calls onZoomOut', async () => {
+    const onZoomOut = vi.fn();
+    const { rerender } = render(
+      <VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} canZoomOut={false} onZoomOut={onZoomOut} />,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
+    expect(screen.queryByRole('button', { name: 'Zoom out' })).not.toBeInTheDocument();
+
+    rerender(
+      <VolumeHistogram filters={{}} timeZone="UTC" isMobile={false} onZoom={vi.fn()} canZoomOut onZoomOut={onZoomOut} />,
+    );
+    const zoomOutBtn = screen.getByRole('button', { name: 'Zoom out' });
+    fireEvent.click(zoomOutBtn);
+    expect(onZoomOut).toHaveBeenCalledTimes(1);
+  });
+
   it('on a touch screen pins a tapped bar\'s counts in a box that zooms when tapped', async () => {
     const onZoom = vi.fn();
     render(<VolumeHistogram filters={{}} timeZone="UTC" isMobile onZoom={onZoom} />);

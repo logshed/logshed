@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ZoomOut } from 'lucide-react';
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fetchLogHistogram, LogHistogram, LogHistogramBucket } from '../../api/logs.ts';
 import { ApiError } from '../../api/client.ts';
@@ -48,6 +48,10 @@ interface VolumeHistogramProps {
   isMobile: boolean;
   /** Called with a bar's span (UTC ISO times) when it is clicked. */
   onZoom: (from: string, to: string) => void;
+  /** True when the user has zoomed in via the chart and can step back. */
+  canZoomOut?: boolean;
+  /** Restores the previous time range without touching other filters. */
+  onZoomOut?: () => void;
 }
 
 /**
@@ -183,7 +187,14 @@ const filterKey = (f: LogFilterParams) =>
  * box, and a tap on the box zooms); 1-second bars, the smallest, do not zoom. While the Console follows new logs the counts are fetched again
  * every few seconds, never from the browser's own buffer, which drops logs under load.
  */
-export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZone, isMobile, onZoom }) => {
+export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({
+  filters,
+  timeZone,
+  isMobile,
+  onZoom,
+  canZoomOut = false,
+  onZoomOut,
+}) => {
   const [data, setData] = useState<LogHistogram | null>(null);
   // The filters the shown counts are for: bars of earlier filters are dimmed and cannot be
   // clicked until the new counts arrive, so a click never zooms the new filters to an old bar
@@ -384,6 +395,17 @@ export const VolumeHistogram: React.FC<VolumeHistogramProps> = ({ filters, timeZ
         ) : (
           hint && <span>{hint}</span>
         )}
+          {canZoomOut && onZoomOut && (
+            <button
+              type="button"
+              onClick={onZoomOut}
+              title="Return to the previous time range without resetting other filters"
+              className="shrink-0 inline-flex items-center gap-1 rounded-xs px-1 text-accent-300 hover:text-accent-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-accent-500"
+            >
+              <ZoomOut aria-hidden="true" className="w-3 h-3" />
+              Zoom out
+            </button>
+          )}
           {data && (
             <button
               type="button"

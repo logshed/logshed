@@ -280,14 +280,27 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     compiledQueryRef.current = compileSearchQuery(filters.query);
   }, [filters.query]);
 
+  // Time ranges saved before each chart zoom, so Zoom out steps back without resetting other filters
+  const [zoomHistory, setZoomHistory] = useState<Array<{ from?: string; to?: string }>>([]);
+  const zoomHistoryRef = useRef(zoomHistory);
+  zoomHistoryRef.current = zoomHistory;
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+
   const { applyFiltersNow } = buffer;
   const handleApplySavedView = useCallback((newParams: LogFilterParams) => {
     // The filter effect is the only loader, so a saved view fetches once
     applyFiltersNow();
+    setZoomHistory([]);
     setFilters(withHostAppLists(newParams));
   }, [applyFiltersNow]);
 
-  const handleFilterChange = useCallback((next: LogFilterParams) => setFilters(withHostAppLists(next)), []);
+  const handleFilterChange = useCallback((next: LogFilterParams) => {
+    if (next.from !== filtersRef.current.from || next.to !== filtersRef.current.to) {
+      setZoomHistory([]);
+    }
+    setFilters(withHostAppLists(next));
+  }, []);
 
   // The volume histogram, shown or hidden as this browser last left it
   const [histogramShown, setHistogramShown] = useState<boolean>(
@@ -312,7 +325,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     });
   }, []);
   // A click on a bar zooms to its span as a new browser history entry (the filters otherwise
-  // replace the current one), so Back returns to the range before the zoom
+  // replace the current one), so Back and Zoom out both return to the range before the zoom
   const zoomToRange = useCallback(
     (from: string, to: string) => {
       // Already showing that range (a second click on a bar of the zoomed chart): no history entry
@@ -322,12 +335,35 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       } catch {
         // No history entry: the zoom still applies
       }
-      handleFilterChange({ ...filters, from, to });
+      setZoomHistory((prev) => [...prev, { from: filters.from, to: filters.to }]);
+      setFilters(withHostAppLists({ ...filters, from, to }));
     },
-    [filters, handleFilterChange],
+    [filters],
   );
+  const zoomOut = useCallback(() => {
+    const stack = zoomHistoryRef.current;
+    if (stack.length === 0) return;
+    const target = stack[stack.length - 1];
+    setZoomHistory(stack.slice(0, -1));
+    setFilters((cur) => {
+      const next: LogFilterParams = { ...cur };
+      if (target.from !== undefined) next.from = target.from;
+      else delete next.from;
+      if (target.to !== undefined) next.to = target.to;
+      else delete next.to;
+      return next;
+    });
+  }, []);
   useEffect(() => {
-    const onPopState = () => setFilters(withHostAppLists(parseFiltersFromUrl()));
+    const onPopState = () => {
+      const parsed = withHostAppLists(parseFiltersFromUrl());
+      setFilters(parsed);
+      setZoomHistory((prev) =>
+        prev.length > 0 && prev[prev.length - 1].from === parsed.from && prev[prev.length - 1].to === parsed.to
+          ? prev.slice(0, -1)
+          : [],
+      );
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
@@ -725,6 +761,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const { scrollToTopLive } = buffer;
   const { deselectAll } = selection;
   const handleResetFilters = useCallback(() => {
+    setZoomHistory([]);
     setFilters({});
     deselectAll();
     scrollToTopLive('instant');
@@ -837,6 +874,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             timeZone={serverTimezone || undefined}
             isMobile={isMobile}
             onZoom={zoomToRange}
+            canZoomOut={zoomHistory.length > 0}
+            onZoomOut={zoomOut}
           />
         )}
       </div>
