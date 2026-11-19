@@ -1,7 +1,7 @@
 // The live stream, its connection, history pages and alert-link focus.
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LiveLogStream } from '../components/logs/LiveLogStream.tsx';
+import { LiveLogStream, SSE_HIDDEN_PAUSE_MS } from '../components/logs/LiveLogStream.tsx';
 import { parseFocusLogIdFromUrl } from '../utils/filters.ts';
 import * as savedViewsApi from '../api/savedViews.ts';
 import * as settingsApi from '../api/settings.ts';
@@ -554,6 +554,59 @@ describe('LiveLogStream loading, connection and selection', () => {
       expect(handler).toHaveBeenCalled();
     } finally {
       window.removeEventListener('logshed:unauthorized', handler);
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes the live stream immediately on pagehide', async () => {
+    renderStream();
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[0];
+    const closeSpy = vi.spyOn(es, 'close');
+    expect(closeSpy).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    expect(closeSpy).toHaveBeenCalled();
+  });
+
+  it('pauses the live stream after 30s in a hidden tab, then reconnects and refreshes on return', async () => {
+    const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
+    renderStream();
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const firstEs = MockEventSource.instances[0];
+    const closeSpy = vi.spyOn(firstEs, 'close');
+    const initialFetches = fetchSpy.mock.calls.length;
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      // Still open during the grace period
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SSE_HIDDEN_PAUSE_MS - 1000);
+      });
+      expect(closeSpy).not.toHaveBeenCalled();
+
+      // Closed once the hidden grace period elapses, without showing a disconnect banner
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      expect(closeSpy).toHaveBeenCalled();
+      expect(screen.queryByText('Live stream disconnected')).not.toBeInTheDocument();
+
+      // Returning to the tab reconnects the stream and refreshes the top of the list
+      const countBeforeReturn = MockEventSource.instances.length;
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(MockEventSource.instances.length).toBeGreaterThan(countBeforeReturn);
+      expect(fetchSpy.mock.calls.length).toBeGreaterThan(initialFetches);
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
       vi.useRealTimers();
     }
   });

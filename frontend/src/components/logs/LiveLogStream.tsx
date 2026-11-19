@@ -98,6 +98,9 @@ interface LiveLogStreamProps {
 
 // Pages of older logs loaded at most while looking for a focused log (500 logs each)
 const MAX_FOCUS_PAGES = 10;
+// How long a background tab keeps the live SSE stream open before pausing it: avoids
+// filling the browser/proxy flow-control window or stalling HTTP/2 refreshes after idle
+export const SSE_HIDDEN_PAUSE_MS = 30_000;
 
 const EMPTY_SELECTED_LOGS: ProcessedLogEntry[] = [];
 
@@ -320,9 +323,71 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   const streamRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamRetryAttemptRef = useRef<number>(0);
+  const [streamPausedForHidden, setStreamPausedForHidden] = useState<boolean>(false);
+  const streamPausedForHiddenRef = useRef<boolean>(false);
+  streamPausedForHiddenRef.current = streamPausedForHidden;
+  const hiddenPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const filtersToRef = useRef<string | undefined>(filters.to);
+  filtersToRef.current = filters.to;
+  const { loadInitialLogs } = buffer;
 
   // Connect to SSE stream
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Close SSE immediately when leaving/refreshing the page, and pause it after the tab has
+  // stayed hidden for SSE_HIDDEN_PAUSE_MS so background tabs do not stall reverse-proxy HTTP/2 connections.
+  useEffect(() => {
+    const clearHiddenTimer = () => {
+      if (hiddenPauseTimerRef.current !== null) {
+        clearTimeout(hiddenPauseTimerRef.current);
+        hiddenPauseTimerRef.current = null;
+      }
+    };
+    const scheduleHiddenPause = () => {
+      clearHiddenTimer();
+      hiddenPauseTimerRef.current = setTimeout(() => {
+        hiddenPauseTimerRef.current = null;
+        if (document.visibilityState === 'hidden') {
+          setStreamPausedForHidden(true);
+        }
+      }, SSE_HIDDEN_PAUSE_MS);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        scheduleHiddenPause();
+      } else {
+        clearHiddenTimer();
+        if (streamPausedForHiddenRef.current) {
+          setStreamPausedForHidden(false);
+          if (!filtersToRef.current && isAutoScrollRef.current) {
+            loadInitialLogs();
+          }
+        }
+      }
+    };
+    const onPageHide = () => {
+      clearHiddenTimer();
+      if (streamRetryTimerRef.current !== null) {
+        clearTimeout(streamRetryTimerRef.current);
+        streamRetryTimerRef.current = null;
+      }
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+    if (document.visibilityState === 'hidden') {
+      scheduleHiddenPause();
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      clearHiddenTimer();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [isAutoScrollRef, loadInitialLogs]);
+
   useEffect(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -332,8 +397,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     setStreamDisconnected(false);
     resetSkipped();
 
-    // If viewing a bounded historical range (to is specified), pause/skip live incoming SSE events
-    if (filters.to) {
+    // If viewing a bounded historical range (to is specified) or paused while hidden, skip live SSE
+    if (filters.to || streamPausedForHidden) {
       return;
     }
 
@@ -408,7 +473,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       eventSourceRef.current = null;
       dropPendingLiveLogs();
     };
-  }, [filters.severity_max, filters.to, sourcesKey, appsKey, queueLiveLog, dropPendingLiveLogs, streamReconnectNonce, noteSkipped, resetSkipped]);
+  }, [filters.severity_max, filters.to, sourcesKey, appsKey, queueLiveLog, dropPendingLiveLogs, streamReconnectNonce, streamPausedForHidden, noteSkipped, resetSkipped]);
 
   const reconnectStream = () => {
     if (streamRetryTimerRef.current !== null) {
