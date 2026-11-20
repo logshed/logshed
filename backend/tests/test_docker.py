@@ -218,34 +218,66 @@ class TestDockerLogParsing:
 # 3. Graceful Docker Socket Fallback
 # ===================================================================
 
+async def _wait_for_log(caplog, text: str, timeout: float = 5.0) -> None:
+    """Wait until text is logged. A fixed sleep fails whenever the loop stalls (a full garbage
+    collection pass in this suite can take 200 to 500 ms), so wait for the line itself."""
+    deadline = time.monotonic() + timeout
+    while text not in caplog.text:
+        if time.monotonic() > deadline:
+            raise AssertionError(f"{text!r} was not logged within {timeout} s; log so far: {caplog.text!r}")
+        await asyncio.sleep(0.01)
+
+
+def _fake_socket(monkeypatch, appears_on_check: int | None):
+    """
+    Make /var/run/docker.sock missing, or appear on the given os.path.exists check. Every other
+    path keeps the real answer: pathlib's Path.exists goes through os.path.exists on Python 3.14,
+    so answering True for everything would also fake the settings database.
+    """
+    real_exists = os.path.exists
+    checks = 0
+
+    def _exists(path):
+        nonlocal checks
+        if path == "/var/run/docker.sock":
+            checks += 1
+            return appears_on_check is not None and checks >= appears_on_check
+        return real_exists(path)
+
+    monkeypatch.setattr(os.path, "exists", _exists)
+
+
 class TestDockerSocketFallback:
+    """
+    Each tailer keeps its alias cache on a temporary database and gets an explicit enable_docker, so
+    the tests read neither /data nor the process-wide settings cache, and a found socket is
+    answered by a fake Docker API, never the machine's own daemon.
+    """
+
+    @staticmethod
+    def _tailer(tmp_path, **kwargs) -> DockerTailer:
+        return DockerTailer(
+            KeyedMultilineAssembler(),
+            db_path=str(tmp_path / "logs.db"),
+            enable_docker=True,
+            **kwargs,
+        )
 
     @pytest.mark.asyncio
-    async def test_socket_not_found_fallback(self, monkeypatch, caplog):
+    async def test_socket_not_found_fallback(self, monkeypatch, caplog, tmp_path):
         caplog.set_level(logging.INFO)
         monkeypatch.setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
-
-        orig_exists = os.path.exists
-
-        def _mock_exists(path):
-            if path == "/var/run/docker.sock":
-                return False
-            return orig_exists(path)
-
-        monkeypatch.setattr(os.path, "exists", _mock_exists)
-
-        assembler = KeyedMultilineAssembler()
-        tailer = DockerTailer(assembler, socket_poll_interval=0.01, socket_poll_max=0.02)
+        _fake_socket(monkeypatch, appears_on_check=None)
+        tailer = self._tailer(tmp_path, socket_poll_interval=0.01, socket_poll_max=0.02)
 
         task = asyncio.create_task(tailer.run())
-        await asyncio.sleep(0.06)
+        await _wait_for_log(
+            caplog,
+            "Docker socket not found at /var/run/docker.sock. "
+            "Docker container tailing disabled; operating in syslog-only mode.",
+        )
 
         assert "Polling for socket before fallback" in caplog.text
-        expected_msg = (
-            "Docker socket not found at /var/run/docker.sock. "
-            "Docker container tailing disabled; operating in syslog-only mode."
-        )
-        assert expected_msg in caplog.text
         assert not task.done()
 
         await tailer.stop()
@@ -253,23 +285,21 @@ class TestDockerSocketFallback:
         assert task.done()
 
     @pytest.mark.asyncio
-    async def test_socket_polling_attaches_when_socket_appears(self, monkeypatch, caplog):
+    async def test_socket_polling_attaches_when_socket_appears(self, monkeypatch, caplog, tmp_path):
         """If docker.sock is missing at first but appears during polling, DockerTailer connects."""
         caplog.set_level(logging.INFO)
         monkeypatch.setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+        _fake_socket(monkeypatch, appears_on_check=2)
+        tailer = self._tailer(tmp_path, socket_poll_interval=0.02, socket_poll_max=0.5)
 
-        exists_calls = 0
-        def _mock_exists(path):
-            nonlocal exists_calls
-            if path == "/var/run/docker.sock":
-                exists_calls += 1
-                return exists_calls >= 2  # becomes True on 2nd check
-            return True
+        pings = []
 
-        monkeypatch.setattr(os.path, "exists", _mock_exists)
+        def _client(*args, **kwargs) -> httpx.AsyncClient:
+            def handler(request: httpx.Request) -> httpx.Response:
+                pings.append(request.url.path)
+                return httpx.Response(200, text="OK")
 
-        assembler = KeyedMultilineAssembler()
-        tailer = DockerTailer(assembler, socket_poll_interval=0.02, socket_poll_max=0.5)
+            return httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://docker")
 
         async def _mock_attach(client):
             pass
@@ -277,49 +307,46 @@ class TestDockerSocketFallback:
         async def _mock_watch(client):
             await tailer._cancel_event.wait()
 
+        monkeypatch.setattr("app.collectors.docker_collector._build_client", _client)
         monkeypatch.setattr(tailer, "_attach_running_containers", _mock_attach)
         monkeypatch.setattr(tailer, "_watch_events", _mock_watch)
 
         task = asyncio.create_task(tailer.run())
-        await asyncio.sleep(0.08)
+        await _wait_for_log(caplog, "Connected to Docker daemon at /var/run/docker.sock")
 
         assert "Docker socket found at /var/run/docker.sock" in caplog.text
+        assert pings == ["/_ping"]
         await tailer.stop()
         await task
 
     @pytest.mark.asyncio
-    async def test_docker_disabled_by_config(self, monkeypatch, caplog):
+    async def test_docker_disabled_by_config(self, monkeypatch, caplog, tmp_path):
         """Setting DOCKER_HOST=none immediately operates in syslog-only mode without polling delay."""
         caplog.set_level(logging.INFO)
         monkeypatch.setenv("DOCKER_HOST", "none")
-
-        assembler = KeyedMultilineAssembler()
-        tailer = DockerTailer(assembler)
+        tailer = self._tailer(tmp_path)
 
         task = asyncio.create_task(tailer.run())
-        await asyncio.sleep(0.02)
+        await _wait_for_log(caplog, "Docker container tailing disabled by configuration; operating in syslog-only mode.")
 
-        assert "Docker container tailing disabled by configuration; operating in syslog-only mode." in caplog.text
+        assert "Polling for socket" not in caplog.text
         await tailer.stop()
         await task
         assert task.done()
 
     @pytest.mark.asyncio
-    async def test_remote_tcp_connection_failure_logging(self, monkeypatch, caplog):
+    async def test_remote_tcp_connection_failure_logging(self, monkeypatch, caplog, tmp_path):
         """Remote TCP connection failures should log descriptive error with target URL."""
         caplog.set_level(logging.WARNING)
         # Point to an unallocated port on localhost to trigger connection failure
         monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:59999")
-
-        assembler = KeyedMultilineAssembler()
-        tailer = DockerTailer(assembler)
+        tailer = self._tailer(tmp_path)
 
         task = asyncio.create_task(tailer.run())
-        await asyncio.sleep(0.15)
+        await _wait_for_log(caplog, "Docker connection error at http://127.0.0.1:59999")
 
         await tailer.stop()
         await task
-        assert "Docker connection error at http://127.0.0.1:59999" in caplog.text
 
 
 # ===================================================================
