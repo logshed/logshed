@@ -39,6 +39,7 @@
 - [Screenshots](#screenshots)
 - [Documentation](#documentation)
 - [System Requirements](#system-requirements)
+- [Performance](#performance)
 - [Built With](#built-with)
 - [Local Development](#local-development)
 - [Support the Project](#support-the-project)
@@ -227,11 +228,22 @@ Step-by-step setup guides and references live in [`docs/`](docs/):
 > [!WARNING]
 > **Keep `/data` on local storage:** Do not place `/data` on network shares (NFS, SMB) or Unraid FUSE user shares (`/mnt/user/`). SQLite WAL mode requires local filesystem locking and shared memory (`mmap`).
 
-**Typical resource footprint** (measured with ~814,000 stored logs at 20 logs/sec on an Intel Core i3-12100):
-- **RAM**: ~240 MB
-- **CPU**: < 0.1% idle
-- **Disk**: ~67 MB per 100,000 logs (~670 MB per 1,000,000 logs), including full-text search indexes
-- **Search speed**: ~46 ms median across 814,000 logs
+---
+
+## Performance
+
+Measured on LogShed 1.4.0 development builds, running on one core (two threads) of an Intel Core i3-12100 on Unraid:
+
+| Measure | Result |
+|---|---|
+| **Receiving logs** (UDP or TCP) | 10,000 logs per second for 5 minutes with none lost, while the web interface returned the newest logs in a median of 10 to 11 ms (95% within 35 ms) |
+| **50 million logs over 30 days** | 21.7 GiB on disk; full-text searches across all of them in about 40 to 50 ms; a count of every log in under 30 ms |
+| **Retention** | A day of 1.7 million logs deleted in 0.35 s, with its disk space back at once |
+| **Upgrade to 1.4.0** | A 50-million-log database upgraded in about 8 s |
+| **Disk** | About 52 MB per 100,000 real homelab logs, full-text search index included |
+| **Memory** | About 240 MB |
+
+The load tests sent from another machine on the same network. The 50-million-log figures use generated logs; the disk figure comes from a copy of a real homelab's logs. Searches over 50 million logs are the median of three warm runs. 10,000 logs per second is close to the most one core stores, so it is the rate that was tested, not a limit with room to spare.
 
 ---
 
