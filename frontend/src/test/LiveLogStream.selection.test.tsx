@@ -138,6 +138,28 @@ describe('Console selection and the log drawer', () => {
     });
   });
 
+  it('gives a Shift-click range the new state of the row clicked, so it unticks as well as ticks', async () => {
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+    const box = (i: number) => document.querySelectorAll('.log-row')[i].firstElementChild as HTMLElement;
+    const ticked = () =>
+      Array.from(document.querySelectorAll('.log-row[aria-selected="true"]')).map((r) => r.getAttribute('data-index'));
+
+    fireEvent.click(box(0));
+    fireEvent.click(box(3), { shiftKey: true });
+    expect(ticked()).toEqual(['0', '1', '2', '3']);
+    // Untick a row in the middle, then Shift-click a ticked row: the range between them is unticked
+    fireEvent.click(box(1));
+    expect(ticked()).toEqual(['0', '2', '3']);
+    fireEvent.click(box(3), { shiftKey: true });
+    expect(ticked()).toEqual(['0']);
+    // Shift-clicking an unticked row ticks the range from the last row clicked
+    fireEvent.click(box(2), { shiftKey: true });
+    expect(ticked()).toEqual(['0', '2', '3']);
+  });
+
   it('supports individual multi-host selection and shows multi-host status in action bar', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
@@ -383,6 +405,13 @@ describe('Console selection and the log drawer', () => {
       key(list, ' '); // unticks the cursor row
       expect(screen.getByText('2 logs selected')).toBeInTheDocument();
       expect(document.getElementById('log-row-103')).toHaveAttribute('aria-selected', 'false');
+
+      // Shift+Space on a ticked row unticks the range back to the last row ticked or unticked
+      key(list, 'ArrowUp');
+      key(list, ' ', { shiftKey: true });
+      expect(screen.getByText('1 log selected')).toBeInTheDocument();
+      expect(document.getElementById('log-row-101')).toHaveAttribute('aria-selected', 'true');
+      expect(document.getElementById('log-row-102')).toHaveAttribute('aria-selected', 'false');
     });
 
     it('opens the cursor row with Enter, and Esc returns focus to the list with the cursor on the last log viewed', async () => {

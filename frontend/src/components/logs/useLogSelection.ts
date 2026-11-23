@@ -22,7 +22,9 @@ export function useLogSelection(logsRef: MutableRefObject<ProcessedLogEntry[]>, 
     }
   }, [clearSignal]);
 
-  // Multi-select across single or multiple hosts with Shift-click range support
+  // Multi-select across single or multiple hosts with Shift-click range support. A range takes the new
+  // state of the row clicked (as in Gmail): Shift-clicking a ticked row unticks the range back to the
+  // last row clicked, Shift-clicking an unticked row ticks it.
   const toggleSelectLog = useCallback(
     (log: LogEntry, index: number, shiftKey: boolean) => {
       const lastIndex = lastSelectedLogIndexRef.current;
@@ -33,7 +35,8 @@ export function useLogSelection(logsRef: MutableRefObject<ProcessedLogEntry[]>, 
           const start = Math.min(lastIndex, index);
           const end = Math.max(lastIndex, index);
           const rangeLogs = logsRef.current.slice(start, end + 1);
-          rangeLogs.forEach((l) => next.add(l.id));
+          const tick = !prev.has(log.id);
+          rangeLogs.forEach((l) => (tick ? next.add(l.id) : next.delete(l.id)));
         } else if (next.has(log.id)) {
           next.delete(log.id);
         } else {
