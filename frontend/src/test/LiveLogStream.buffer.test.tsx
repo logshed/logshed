@@ -145,6 +145,7 @@ describe('Console buffer and live rows', () => {
   });
 
   it('anchors the scroll position with the mobile row height after crossing the breakpoint', async () => {
+    // Only the width queries change: a desktop window narrowed past the breakpoint, not a touch screen
     const listeners: ((e: { matches: boolean }) => void)[] = [];
     window.matchMedia = ((query: string) => ({
       matches: false,
@@ -152,7 +153,9 @@ describe('Console buffer and live rows', () => {
       onchange: null,
       addListener: vi.fn(),
       removeListener: vi.fn(),
-      addEventListener: (_: string, cb: (e: { matches: boolean }) => void) => listeners.push(cb),
+      addEventListener: (_: string, cb: (e: { matches: boolean }) => void) => {
+        if (query.includes('max-width')) listeners.push(cb);
+      },
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
     })) as any;
@@ -254,6 +257,53 @@ describe('Console buffer and live rows', () => {
       expect(state.writes).toEqual([200 + 3 * MOBILE_LOG_ROW_HEIGHT]);
       expect(shownLiveRows()).toEqual(['Held live 903', 'Held live 902', 'Held live 901']);
       expect(screen.getByText(/3 new logs at top/)).toBeInTheDocument();
+    });
+
+    it('on a touch screen, holds new rows the whole time the list is paused and adds them when it resumes', async () => {
+      // iOS Safari sends no touch events for a finger that stops a glide, and undoes a scrollTop write
+      // made while that finger rests on its next move, so a paused touch-screen list must not change at all
+      window.matchMedia = ((query: string) => ({
+        matches: query.includes('max-width') || query.includes('pointer: coarse'),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })) as any;
+      renderStream();
+      await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText('TIMESTAMP')).toBeNull());
+      const { scroller, state } = setupPausedScroller();
+
+      vi.useFakeTimers();
+      try {
+        // A drag with no touch events, then the finger resting for two seconds while logs keep arriving
+        for (let i = 0; i < 4; i++) {
+          state.top += 10;
+          fireEvent.scroll(scroller);
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(50);
+          });
+        }
+        for (const id of [921, 922, 923, 924]) {
+          emitLive([id]);
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(500);
+          });
+        }
+        expect(state.writes).toEqual([]);
+        expect(shownLiveRows()).toEqual([]);
+        expect(screen.getByText(/4 new logs at top/)).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // Back at the top, auto-scroll resumes and the held rows join there
+      state.top = 0;
+      fireEvent.scroll(scroller);
+      await waitFor(() => expect(shownLiveRows()).toEqual(['Held live 924', 'Held live 923', 'Held live 922', 'Held live 921']));
     });
 
     it('holds new rows during a glide after the finger lifts', async () => {

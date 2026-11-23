@@ -2,6 +2,7 @@ import { MutableRefObject, useCallback, useEffect, useLayoutEffect, useRef, useS
 import { LogEntry, LogFilterParams } from '../../types.ts';
 import { fetchLogs } from '../../api/logs.ts';
 import { getTodayKey } from '../../utils/formatters.ts';
+import { useMediaQuery } from '../../utils/hooks.ts';
 import {
   ProcessedLogEntry,
   mergeRowsInTimeOrder,
@@ -108,7 +109,7 @@ export function useLogBuffer({
 
   // Incoming SSE batch buffer & flush timer
   const incomingBufferRef = useRef<LogEntry[]>([]);
-  // Live rows held back while scrolled back with a full scrollback buffer (newest first)
+  // Live rows held back while paused and scrolling, on a touch screen or with a full scrollback buffer (newest first)
   const heldLiveRowsRef = useRef<ProcessedLogEntry[]>([]);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -125,8 +126,14 @@ export function useLogBuffer({
   const scrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The scrollTop our own anchoring wrote, so its scroll event is not taken for the user's
   const anchoredScrollTopRef = useRef<number | null>(null);
-  // Set when held rows were dropped (the scrollback buffer was full): they then wait for auto-scroll to
-  // resume, because joining them to the list would leave a gap
+  // A touch screen holds every live row while paused, until auto-scroll resumes: iOS Safari sends no
+  // touch events for a finger that stops a glide, and undoes a scrollTop write made while that finger
+  // rests on its next move, so a correction for rows added above shows as a jump by their height
+  const isTouchScreen = useMediaQuery('(pointer: coarse)');
+  const isTouchScreenRef = useRef<boolean>(isTouchScreen);
+  isTouchScreenRef.current = isTouchScreen;
+  // Set when held rows were dropped (more than LIVE_BUFFER_SIZE waited): they then wait for auto-scroll
+  // to resume, because joining them to the list would leave a gap
   const heldRowsDroppedRef = useRef<boolean>(false);
   // Set when more logs arrived during a stream pause than a catch-up could join without a gap: the
   // list reloads once auto-scroll resumes
@@ -154,7 +161,7 @@ export function useLogBuffer({
     setLogs(logs.slice(0, cap));
   }, [logs, autoScroll]);
 
-  // Rows held back while the scrollback buffer was full join the top once auto-scroll resumes
+  // Rows still held (a full scrollback buffer, or a touch screen) join the top once auto-scroll resumes
   useEffect(() => {
     if (!autoScroll || heldLiveRowsRef.current.length === 0) return;
     const held = heldLiveRowsRef.current;
@@ -215,11 +222,13 @@ export function useLogBuffer({
   }, [getFormatContext, logsRef, selectionAnchor]);
 
   // Rows held while the user was scrolling join the list in one batch, with one scroll correction,
-  // once scrolling has stopped. Rows held because the scrollback buffer is full wait for auto-scroll.
+  // once scrolling has stopped. Rows held because the scrollback buffer is full, or on a touch screen,
+  // wait for auto-scroll.
   const releaseHeldLiveRows = useCallback(() => {
     const held = heldLiveRowsRef.current;
     if (
       held.length === 0 ||
+      isTouchScreenRef.current ||
       isAutoScrollRef.current ||
       isTouchingRef.current ||
       isScrollingRef.current ||
@@ -265,13 +274,19 @@ export function useLogBuffer({
 
     if (!isAutoScrollRef.current) {
       setMissedLogsCount((prev) => prev + toFlush.length);
-      // Scrolled back and either still scrolling, or with a full scrollback buffer: hold new rows
+      // Scrolled back on a touch screen, still scrolling, or with a full scrollback buffer: hold new rows
       // (counted in the "N new" banner). Moving the list under a finger or a glide shows as a jump on
       // phones, and trimming the full buffer would cut the history the user is reading.
       const bufferFull = logsRef.current.length + heldLiveRowsRef.current.length + prepared.length > SCROLLBACK_BUFFER_SIZE;
-      if (heldLiveRowsRef.current.length > 0 || bufferFull || isTouchingRef.current || isScrollingRef.current) {
+      if (
+        heldLiveRowsRef.current.length > 0 ||
+        bufferFull ||
+        isTouchScreenRef.current ||
+        isTouchingRef.current ||
+        isScrollingRef.current
+      ) {
         const held = [...prepared, ...heldLiveRowsRef.current];
-        if (bufferFull && held.length > LIVE_BUFFER_SIZE) {
+        if (held.length > LIVE_BUFFER_SIZE) {
           heldRowsDroppedRef.current = true;
           heldLiveRowsRef.current = held.slice(0, LIVE_BUFFER_SIZE);
         } else {
