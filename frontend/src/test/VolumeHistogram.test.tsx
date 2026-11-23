@@ -14,6 +14,7 @@ import {
   DisplayBar,
   VolumeBar,
   VolumeHistogram,
+  spanLabel,
 } from '../components/logs/VolumeHistogram.tsx';
 import { demoHistogram } from '../demo/server.ts';
 
@@ -102,14 +103,14 @@ describe('VolumeHistogram', () => {
     expect(screen.getByText('Log volume, all logs kept')).toBeInTheDocument();
     expect(screen.getByText(': 8')).toBeInTheDocument();
     expect(chartBox()).toHaveAccessibleName(
-      'Log volume, all logs kept: 8 logs and 2 errors from 3/28 11:00 to 3/28 12:00, most between 3/28 11:00 - 11:30 (7)',
+      'Log volume, all logs kept: 8 logs and 2 errors from 28 Mar 11:00 to 28 Mar 12:00, most between 28 Mar 11:00 - 11:30 (7)',
     );
   });
 
   it('shows the time on the server clock', async () => {
     render(<VolumeHistogram filters={{}} timeZone="Asia/Tokyo" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    expect(chartBox().getAttribute('aria-label')).toContain('from 3/28 20:00 to 3/28 21:00');
+    expect(chartBox().getAttribute('aria-label')).toContain('from 28 Mar 20:00 to 28 Mar 21:00');
   });
 
   it('says when the range has no logs', async () => {
@@ -161,7 +162,7 @@ describe('VolumeHistogram', () => {
     expect(opacities).toContain('0.45');
     expect(opacities).toContain('1');
     const box = screen.getByRole('button', { name: /Tap here to zoom in/ });
-    expect(box).toHaveTextContent('3/28 11:00 - 11:30: 7');
+    expect(box).toHaveTextContent('28 Mar 11:00 - 11:30: 7');
     fireEvent.click(box);
     expect(onZoom).toHaveBeenCalledWith('2026-03-28T11:00:00.000Z', '2026-03-28T11:29:59.999Z');
     expect(screen.queryByRole('button', { name: /Tap here to zoom in/ })).not.toBeInTheDocument();
@@ -252,7 +253,7 @@ describe('VolumeHistogram', () => {
     });
     render(<VolumeHistogram filters={{ from: '15m' }} timeZone="UTC" isMobile={false} onZoom={vi.fn()} />);
     await act(() => vi.advanceTimersByTimeAsync(HISTOGRAM_DEBOUNCE_MS));
-    expect(chartBox().getAttribute('aria-label')).toContain('most between 3/28 11:00:00 - 11:00:15 (3)');
+    expect(chartBox().getAttribute('aria-label')).toContain('most between 28 Mar 11:00:00 - 11:00:15 (3)');
   });
 
   it('says up to To when only To is set', async () => {
@@ -342,6 +343,17 @@ const scaleBar = (start: number, counts: Partial<Record<'error' | 'warning' | 'i
   return { start, end: start + 1, mid: start, total: b.error + b.warning + b.info + b.debug, ...b };
 };
 const drawnTotal = (b: DisplayBar) => b.error_v + b.warning_v + b.info_v + b.debug_v;
+
+describe('a bar\'s span label', () => {
+  const bar = (start: string, end: string) =>
+    ({ start: Date.parse(start), end: Date.parse(end), mid: 0, total: 0, error: 0, warning: 0, info: 0, debug: 0 });
+
+  it('names the date once when the bar starts and ends on the same day, and both dates across midnight', () => {
+    expect(spanLabel(bar('2026-03-28T11:00:00Z', '2026-03-28T11:30:00Z'), 'UTC')).toBe('28 Mar 11:00 - 11:30');
+    expect(spanLabel(bar('2026-03-28T23:00:00Z', '2026-03-29T00:00:00Z'), 'UTC')).toBe('28 Mar 23:00 - 29 Mar 00:00');
+    expect(spanLabel(bar('2026-03-28T11:00:00Z', '2026-03-28T11:00:15Z'), 'UTC', true)).toBe('28 Mar 11:00:00 - 11:00:15');
+  });
+});
 
 describe('the chart scales', () => {
   it('draws counts on the linear scale, with a severity that has logs at least 3 px tall', () => {

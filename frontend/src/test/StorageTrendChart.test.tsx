@@ -38,11 +38,11 @@ const snapshot = (ms: number): StorageMetricsSnapshot =>
 
 describe('StorageTrendChart', () => {
   it('labels the time axis on the server clock', async () => {
-    // Hourly snapshots from 10/20 16:00 to 10/21 12:00 Tokyo time: 3-hour ticks at Tokyo's even hours
+    // Hourly snapshots from 20 Oct 16:00 to 21 Oct 12:00 Tokyo time: 3-hour ticks at Tokyo's even hours
     const history = Array.from({ length: 21 }, (_, i) => snapshot(tokyo(20, 16) + i * 3600_000));
     render(<StorageTrendChart history={history} />);
     const axis = await screen.findByTestId('x-axis');
-    expect([...axis.querySelectorAll('text')].map((t) => t.textContent)).toEqual(['10/20 18:00', '10/20 21:00', '10/21 00:00', '10/21 03:00', '10/21 06:00', '10/21 09:00', '10/21 12:00']);
+    expect([...axis.querySelectorAll('text')].map((t) => t.textContent)).toEqual(['20 Oct 18:00', '20 Oct 21:00', '21 Oct 00:00', '21 Oct 03:00', '21 Oct 06:00', '21 Oct 09:00', '21 Oct 12:00']);
   });
 
   it('shows the empty state without snapshots', () => {

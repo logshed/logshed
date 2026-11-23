@@ -69,14 +69,16 @@ const toBar = (b: LogHistogramBucket, i: number, all: LogHistogramBucket[], buck
 };
 
 /**
- * A bar's span for its tooltip: '3/14 09:05 - 09:06', with the end's date only when it differs,
+ * A bar's span for its tooltip: '14 Mar 09:05 - 09:06', with the end's date only when it differs,
  * and seconds for bars under a minute.
  */
-function spanLabel(bar: VolumeBar, timeZone?: string, withSeconds = false): string {
+export function spanLabel(bar: VolumeBar, timeZone?: string, withSeconds = false): string {
   const from = formatTimePoint(bar.start, timeZone, withSeconds);
   const to = formatTimePoint(bar.end, timeZone, withSeconds);
-  const [fromDay] = from.split(' ');
-  const [toDay, toTime] = to.split(' ');
+  // The time is the last word; the date before it ('14 Mar') has a space of its own
+  const fromDay = from.slice(0, from.lastIndexOf(' '));
+  const toDay = to.slice(0, to.lastIndexOf(' '));
+  const toTime = to.slice(to.lastIndexOf(' ') + 1);
   return `${from} - ${fromDay === toDay ? toTime : to}`;
 }
 

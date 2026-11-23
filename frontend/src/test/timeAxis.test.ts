@@ -21,28 +21,28 @@ describe('buildTimeTicks on the server clock', () => {
     const { ticks, stepMs } = buildTimeTicks(at(NEW_YORK, 10, 20, 16, 23), at(NEW_YORK, 10, 21, 12, 7), NEW_YORK);
     expect(stepMs).toBe(3 * HOUR_MS);
     expect(ticks.map((t) => formatTimeTick(t, stepMs, NEW_YORK))).toEqual([
-      '10/20 18:00', '10/20 21:00', '10/21 00:00', '10/21 03:00', '10/21 06:00', '10/21 09:00', '10/21 12:00',
+      '20 Oct 18:00', '20 Oct 21:00', '21 Oct 00:00', '21 Oct 03:00', '21 Oct 06:00', '21 Oct 09:00', '21 Oct 12:00',
     ]);
   });
 
   it('starts day steps at the server zone midnight, also in a zone a half hour off UTC', () => {
     const { ticks, stepMs } = buildTimeTicks(at(KOLKATA, 9, 22, 14), at(KOLKATA, 10, 21, 14), KOLKATA, { minStepMs: HOUR_MS });
     expect(stepMs).toBe(7 * DAY_MS);
-    expect(ticks.map((t) => formatTimeTick(t, stepMs, KOLKATA))).toEqual(['9/29', '10/6', '10/13', '10/20']);
+    expect(ticks.map((t) => formatTimeTick(t, stepMs, KOLKATA))).toEqual(['29 Sep', '6 Oct', '13 Oct', '20 Oct']);
     expect(ticks).toEqual([at(KOLKATA, 9, 29, 0), at(KOLKATA, 10, 6, 0), at(KOLKATA, 10, 13, 0), at(KOLKATA, 10, 20, 0)]);
   });
 
   it('keeps hour ticks on the hour on the day the clock goes forward', () => {
     // New York skips 02:00 to 03:00 on 2026-03-08
     expect(labels(at(NEW_YORK, 3, 8, 0), at(NEW_YORK, 3, 8, 6), NEW_YORK)).toEqual([
-      '3/8 00:00', '3/8 01:00', '3/8 03:00', '3/8 04:00', '3/8 05:00', '3/8 06:00',
+      '8 Mar 00:00', '8 Mar 01:00', '8 Mar 03:00', '8 Mar 04:00', '8 Mar 05:00', '8 Mar 06:00',
     ]);
   });
 
   it('keeps hour ticks on the hour on the day the clock goes back, without a repeated label', () => {
     // New York shows 01:00 to 02:00 twice on 2026-11-01
     const shown = labels(at(NEW_YORK, 11, 1, 0), at(NEW_YORK, 11, 1, 5), NEW_YORK);
-    expect(shown).toEqual(['11/1 00:00', '11/1 01:00', '11/1 02:00', '11/1 03:00', '11/1 04:00', '11/1 05:00']);
+    expect(shown).toEqual(['1 Nov 00:00', '1 Nov 01:00', '1 Nov 02:00', '1 Nov 03:00', '1 Nov 04:00', '1 Nov 05:00']);
   });
 
   it('keeps day ticks at midnight across both daylight saving changes', () => {
@@ -83,6 +83,6 @@ describe('buildTimeTicks on the server clock', () => {
   });
 
   it('shows tooltip times on the server clock', () => {
-    expect(formatTimePoint(at(NEW_YORK, 10, 20, 7, 5), NEW_YORK)).toBe('10/20 07:05');
+    expect(formatTimePoint(at(NEW_YORK, 10, 20, 7, 5), NEW_YORK)).toBe('20 Oct 07:05');
   });
 });

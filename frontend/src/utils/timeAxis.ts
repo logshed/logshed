@@ -1,4 +1,4 @@
-import { getDateParts, isKnownTimeZone, wallClockMs, zoneWallClockToEpoch } from './formatters.ts';
+import { MONTH_NAMES, getDateParts, isKnownTimeZone, wallClockMs, zoneWallClockToEpoch } from './formatters.ts';
 
 // Time axes for charts, on the server's clock as every other time in the web UI. Ticks sit at
 // even wall-clock times of that zone (06:00, midnight), whatever zone the browser is in.
@@ -60,21 +60,21 @@ export function buildTimeTicks(
 const pad2 = (n: number | string) => String(n).padStart(2, '0');
 
 /**
- * Axis label on the zone's clock: 'M/D' for day steps, 'M/D HH:00' for hour steps, 'HH:mm' below
+ * Axis label on the zone's clock: 'D Mon' for day steps, 'D Mon HH:00' for hour steps, 'HH:mm' below
  * an hour and 'HH:mm:ss' below a minute. withDate: false leaves the date off hour steps too, for
  * ranges inside a day.
  */
 export function formatTimeTick(ms: number, stepMs: number, timeZone?: string, withDate = true): string {
   const p = getDateParts(new Date(ms), axisTimeZone(timeZone));
-  const day = `${p.month}/${p.day}`;
+  const day = `${p.day} ${MONTH_NAMES[p.month - 1]}`;
   if (stepMs >= DAY_MS) return day;
   if (stepMs >= HOUR_MS) return withDate ? `${day} ${p.hours}:00` : `${p.hours}:00`;
   if (stepMs >= MINUTE_MS) return `${p.hours}:${pad2(p.minutes)}`;
   return `${p.hours}:${pad2(p.minutes)}:${pad2(p.seconds)}`;
 }
 
-/** A point in time for a chart tooltip: 'M/D HH:mm' on the zone's clock, with ':ss' when withSeconds. */
+/** A point in time for a chart tooltip: 'D Mon HH:mm' on the zone's clock, with ':ss' when withSeconds. */
 export function formatTimePoint(ms: number, timeZone?: string, withSeconds = false): string {
   const p = getDateParts(new Date(ms), axisTimeZone(timeZone));
-  return `${p.month}/${p.day} ${p.hours}:${p.minutes}${withSeconds ? `:${p.seconds}` : ''}`;
+  return `${p.day} ${MONTH_NAMES[p.month - 1]} ${p.hours}:${p.minutes}${withSeconds ? `:${p.seconds}` : ''}`;
 }
