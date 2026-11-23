@@ -5,6 +5,10 @@ import { LogEntry } from '../types.ts';
 import * as logsApi from '../api/logs.ts';
 import * as clipboardModule from '../utils/clipboard.ts';
 
+// Matches the element whose whole text is `text`, even when it is split over child elements
+const fullText = (text: string) => (_: string, el: Element | null) =>
+  el?.textContent === text && [...(el?.children ?? [])].every((child) => child.textContent !== text);
+
 describe('LogDetailModal Component (Items #8, #9, #11)', () => {
   const sampleLog: LogEntry = {
     id: 100,
@@ -102,9 +106,26 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     );
 
     expect(screen.getByText('Timestamp (UTC+01:00)')).toBeInTheDocument();
-    expect(screen.getByText('2026-10-25 01:59:59.000')).toBeInTheDocument();
+    expect(screen.getByText(fullText('2026-10-25 01:59:59.000'))).toBeInTheDocument();
     expect(screen.getByText('Received At (UTC+00:00)')).toBeInTheDocument();
-    expect(screen.getByText('2026-10-25 01:00:01.000')).toBeInTheDocument();
+    expect(screen.getByText(fullText('2026-10-25 01:00:01.000'))).toBeInTheDocument();
+  });
+
+  it('wraps a timestamp only between its date and time, and gives the time cards the wider columns', () => {
+    render(<LogDetailModal log={sampleLog} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} timeZone="UTC" />);
+    for (const text of ['2026-08-29 14:30:00.000', '2026-08-29 14:30:00.100', 'UTC: 2026-08-29T14:30:00.000Z', 'UTC: 2026-08-29T14:30:00.100Z']) {
+      const value = screen.getByText(fullText(text));
+      expect(value.className).not.toContain('break-all');
+      // Each part is unbreakable, with a break opportunity only between parts
+      const parts = [...value.querySelectorAll('span')];
+      expect(parts.length).toBeGreaterThan(1);
+      for (const part of parts) expect(part.className).toContain('whitespace-nowrap');
+      expect(parts.map((part) => part.textContent).join('')).toBe(text);
+      expect(value.querySelectorAll('wbr')).toHaveLength(parts.length - 1);
+      expect(parts.some((part) => /^\d\d:\d\d:\d\d\.\d{3}Z?$/.test(part.textContent ?? ''))).toBe(true);
+    }
+    const grid = screen.getByText('Facility').closest('.grid')!;
+    expect(grid.className).toContain('md:grid-cols-[2fr_2fr_1fr_1fr]');
   });
 
   it('copies the shown message and the raw record', async () => {

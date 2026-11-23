@@ -58,6 +58,18 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.closest('[data-arrow-scroll]') !== null;
 }
 
+// A timestamp that wraps only between its parts (after a space or the ISO "T"), never inside a number
+const TimeParts: React.FC<{ text: string }> = ({ text }) => (
+  <>
+    {text.split(/(?<=[ T])/).map((part, i) => (
+      <React.Fragment key={i}>
+        {i > 0 && <wbr />}
+        <span className="whitespace-nowrap">{part}</span>
+      </React.Fragment>
+    ))}
+  </>
+);
+
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   log,
   isOpen,
@@ -469,27 +481,28 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
 
 
         {/* Structured Metadata Grid */}
-        <div className="order-1 sm:order-0 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+        {/* The time cards take twice the width of the one-number cards, so a time fits on one line */}
+        <div className="order-1 sm:order-0 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-[2fr_2fr_1fr_1fr] gap-2">
           <div className="bg-canvas p-2.5 rounded-sm border border-line">
             <span className="text-[10px] uppercase font-semibold text-fg-muted block mb-1">
               Timestamp {offsetBadge(log.timestamp)}
             </span>
-            <span className="font-mono text-fg text-xs break-all select-all block">
-              {formatFullTimestamp(log.timestamp, effectiveTimezone)}
+            <span className="font-mono text-fg text-xs select-all block">
+              <TimeParts text={formatFullTimestamp(log.timestamp, effectiveTimezone)} />
             </span>
-            <span className="text-[11px] font-mono text-fg-muted break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
-              UTC: {log.timestamp}
+            <span className="text-[11px] font-mono text-fg-muted select-all block mt-0.5" title="Universal Coordinated Time stored in database">
+              <TimeParts text={`UTC: ${log.timestamp}`} />
             </span>
           </div>
           <div className="bg-canvas p-2.5 rounded-sm border border-line">
             <span className="text-[10px] uppercase font-semibold text-fg-muted block mb-1">
               Received At {offsetBadge(log.received_at)}
             </span>
-            <span className="font-mono text-fg text-xs break-all select-all block">
-              {formatFullTimestamp(log.received_at, effectiveTimezone)}
+            <span className="font-mono text-fg text-xs select-all block">
+              <TimeParts text={formatFullTimestamp(log.received_at, effectiveTimezone)} />
             </span>
-            <span className="text-[11px] font-mono text-fg-muted break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
-              UTC: {log.received_at}
+            <span className="text-[11px] font-mono text-fg-muted select-all block mt-0.5" title="Universal Coordinated Time stored in database">
+              <TimeParts text={`UTC: ${log.received_at}`} />
             </span>
           </div>
           <div className="bg-canvas p-2.5 rounded-sm border border-line">

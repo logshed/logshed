@@ -64,7 +64,7 @@ Read these before updating from 1.3.x. The first start backs up the database wit
 - **AI analysis with older Claude models** works again with Thinking off, and unknown AI providers are refused when saved through the API.
 - **A rare crash** when LogShed stopped, or paused for a Compact, while writing logs.
 - **No log storm in a UDP flood**: Dropped datagrams log one line every 10 seconds, not one each.
-- **Interface**: Explain with AI in the log drawer no longer ticks rows, pressing Shift after ticking a row no longer outlines the whole Console list in Chrome, the Storage trend chart uses the server's time zone, drop rule errors stay until closed, an iPhone no longer zooms into text boxes, the update badge fits a phone and opens the new release's notes, and fonts, contrast, alignment, hover highlights, badge borders and the +1h button's voice control name are as intended.
+- **Interface**: Explain with AI in the log drawer no longer ticks rows, pressing Shift after ticking a row no longer outlines the whole Console list in Chrome, the log drawer's times no longer wrap in the middle of a number, the Storage trend chart uses the server's time zone, drop rule errors stay until closed, an iPhone no longer zooms into text boxes, the update badge fits a phone and opens the new release's notes, and fonts, contrast, alignment, hover highlights, badge borders and the +1h button's voice control name are as intended.
 
 ### Security
 - **A device can no longer pose as another host**: A name a syslog sender reports for itself is marked self-reported, and never shown when an alias, Docker host or LogShed uses it.
