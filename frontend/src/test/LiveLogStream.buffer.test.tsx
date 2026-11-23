@@ -9,6 +9,20 @@ import { MockEventSource, virtualizerControl, sampleLogs, setupStreamMocks } fro
 
 vi.mock('@tanstack/react-virtual', async () => (await import('./liveLogStreamVirtualizer.ts')).virtualizerMock);
 
+// A phone: the narrow layout and a coarse (touch) pointer
+const useTouchScreen = () => {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width') || query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as any;
+};
+
 describe('Console buffer and live rows', () => {
   const { renderStream } = setupStreamMocks();
 
@@ -262,16 +276,7 @@ describe('Console buffer and live rows', () => {
     it('on a touch screen, holds new rows the whole time the list is paused and adds them when it resumes', async () => {
       // iOS Safari sends no touch events for a finger that stops a glide, and undoes a scrollTop write
       // made while that finger rests on its next move, so a paused touch-screen list must not change at all
-      window.matchMedia = ((query: string) => ({
-        matches: query.includes('max-width') || query.includes('pointer: coarse'),
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })) as any;
+      useTouchScreen();
       renderStream();
       await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
       await waitFor(() => expect(screen.queryByText('TIMESTAMP')).toBeNull());
@@ -304,6 +309,47 @@ describe('Console buffer and live rows', () => {
       state.top = 0;
       fireEvent.scroll(scroller);
       await waitFor(() => expect(shownLiveRows()).toEqual(['Held live 924', 'Held live 923', 'Held live 922', 'Held live 921']));
+    });
+
+    it('on a touch screen, resumes when a finger lifts with the list at the top', async () => {
+      useTouchScreen();
+      renderStream();
+      await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText('TIMESTAMP')).toBeNull());
+      const { scroller, state } = setupPausedScroller();
+      emitLive([931, 932]);
+      await waitFor(() => expect(screen.getByText(/2 new logs at top/)).toBeInTheDocument());
+      // A slow drag back to the top with the finger down: no scroll event after the lift
+      fireEvent.touchStart(scroller);
+      state.top = 0;
+      fireEvent.scroll(scroller);
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+      fireEvent.touchEnd(scroller);
+      await waitFor(() => expect(shownLiveRows()).toEqual(['Held live 932', 'Held live 931']));
+      expect(screen.queryByText('Paused')).toBeNull();
+    });
+
+    it('on a touch screen, keeps held rows when the live stream reconnects', async () => {
+      useTouchScreen();
+      renderStream();
+      await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText('TIMESTAMP')).toBeNull());
+      const { scroller, state } = setupPausedScroller();
+      emitLive([941, 942]);
+      await waitFor(() => expect(screen.getByText(/2 new logs at top/)).toBeInTheDocument());
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1] as any;
+      es.readyState = 2;
+      act(() => {
+        es.onerror?.(new Event('error'));
+      });
+      const before = MockEventSource.instances.length;
+      fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+      await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(before));
+      emitLive([943]);
+      await waitFor(() => expect(screen.getByText(/3 new logs at top/)).toBeInTheDocument());
+      state.top = 0;
+      fireEvent.scroll(scroller);
+      await waitFor(() => expect(shownLiveRows()).toEqual(['Held live 943', 'Held live 942', 'Held live 941']));
     });
 
     it('holds new rows during a glide after the finger lifts', async () => {
@@ -422,7 +468,7 @@ describe('Console buffer and live rows', () => {
     });
 
     // Scrolled back 200px (auto-scroll paused), hidden past the pause, then visible again
-    const scrollBackHideAndReturn = async (beforeReturn: () => void) => {
+    const scrollBackHideAndReturn = async (beforeReturn: () => void, afterPause?: () => Promise<void>) => {
       const scroller = document.querySelector('.overflow-y-auto') as HTMLElement;
       let top = 200;
       Object.defineProperty(scroller, 'scrollTop', { get: () => top, set: (v: number) => { top = v; }, configurable: true });
@@ -430,6 +476,7 @@ describe('Console buffer and live rows', () => {
       Object.defineProperty(scroller, 'clientHeight', { get: () => 500, configurable: true });
       fireEvent.scroll(scroller);
       expect(screen.getByText('Paused')).toBeInTheDocument();
+      if (afterPause) await afterPause();
 
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
       act(() => {
@@ -450,6 +497,45 @@ describe('Console buffer and live rows', () => {
         toTop: () => { top = 0; fireEvent.scroll(scroller); },
       };
     };
+
+    it('on a touch screen, keeps the rows held before the pause and counts each missed log once', async () => {
+      useTouchScreen();
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        renderStream();
+        await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+        await waitFor(() => expect(screen.queryByText('TIMESTAMP')).toBeNull());
+        const ret = await scrollBackHideAndReturn(
+          () => {
+            // The server's newest page: one log missed while hidden, then the two held ones, then the list
+            vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({
+              logs: [missedLog(303), missedLog(302), missedLog(301), ...sampleLogs],
+              total: sampleLogs.length + 3,
+              limit: 500,
+              offset: 0,
+            });
+          },
+          async () => {
+            const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+            act(() => {
+              es.emit('log', missedLog(301));
+              es.emit('log', missedLog(302));
+            });
+            await waitFor(() => expect(screen.getByText(/2 new logs at top/)).toBeInTheDocument());
+          },
+        );
+        await waitFor(() => expect(screen.getByText(/3 new logs at top/)).toBeInTheDocument());
+        ret.toTop();
+        await waitFor(() => expect(document.querySelectorAll('.log-row').length).toBe(7));
+        const missed = [...document.querySelectorAll('.log-row')].map((r) => r.textContent ?? '').filter((t) => t.includes('Missed while hidden'));
+        expect(missed).toHaveLength(3);
+        expect(missed[0]).toContain('Missed while hidden 303');
+        expect(missed[2]).toContain('Missed while hidden 301');
+      } finally {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+        vi.useRealTimers();
+      }
+    });
 
     it('adds them at the top of a scrolled-back list, counted in the banner, before reconnecting', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });

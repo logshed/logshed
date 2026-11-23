@@ -265,7 +265,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     isTouchingRef,
     isLoadingMoreRef,
     queueLiveLog,
-    dropPendingLiveLogs,
+    dropQueuedLiveLogs,
     endResumingToTop,
   } = buffer;
 
@@ -538,9 +538,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
       es.close();
       eventSourceRef.current = null;
-      dropPendingLiveLogs();
+      dropQueuedLiveLogs();
     };
-  }, [filters.severity_max, filters.to, sourcesKey, appsKey, queueLiveLog, dropPendingLiveLogs, streamReconnectNonce, streamPausedForHidden, noteSkipped, resetSkipped]);
+  }, [filters.severity_max, filters.to, sourcesKey, appsKey, queueLiveLog, dropQueuedLiveLogs, streamReconnectNonce, streamPausedForHidden, noteSkipped, resetSkipped]);
 
   const reconnectStream = () => {
     if (streamRetryTimerRef.current !== null) {
@@ -549,6 +549,17 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
     streamRetryAttemptRef.current = 0;
     setStreamReconnectNonce((n) => n + 1);
+  };
+
+  // A finger lifting: scrolling may still glide on. At the top, auto-scroll resumes, as a scroll to the top
+  // does while no finger is down (a slow drag to the top sends no scroll event after the lift).
+  const liftFinger = () => {
+    isTouchingRef.current = false;
+    buffer.noteScrollActivity();
+    if (!autoScroll && parentRef.current && parentRef.current.scrollTop <= 5) {
+      setAutoScroll(true);
+      setMissedLogsCount(0);
+    }
   };
 
   // When the cursor last scrolled the list: reaching the top that way (Home) keeps auto-scroll paused
@@ -984,14 +995,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             isTouchingRef.current = true;
             endResumingToTop();
           }}
-          onTouchEnd={() => {
-            isTouchingRef.current = false;
-            buffer.noteScrollActivity();
-          }}
-          onTouchCancel={() => {
-            isTouchingRef.current = false;
-            buffer.noteScrollActivity();
-          }}
+          onTouchEnd={liftFinger}
+          onTouchCancel={liftFinger}
           onWheel={endResumingToTop}
           onMouseDown={() => {
             endResumingToTop();

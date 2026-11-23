@@ -286,7 +286,7 @@ export function useLogBuffer({
         isScrollingRef.current
       ) {
         const held = [...prepared, ...heldLiveRowsRef.current];
-        if (held.length > LIVE_BUFFER_SIZE) {
+        if ((bufferFull || isTouchScreenRef.current) && held.length > LIVE_BUFFER_SIZE) {
           heldRowsDroppedRef.current = true;
           heldLiveRowsRef.current = held.slice(0, LIVE_BUFFER_SIZE);
         } else {
@@ -317,16 +317,25 @@ export function useLogBuffer({
     }
   }, [flushIncomingLogs]);
 
-  /** Drops queued and held live logs, for a stream that closed or a list that is replaced. */
-  const dropPendingLiveLogs = useCallback(() => {
+  /**
+   * Drops live logs not yet flushed, for a stream that closed (a hidden tab, a reconnect). Held rows stay:
+   * they belong to the current filters and are already counted in the "N new" banner, and a touch screen
+   * holds every row while paused, so dropping them would leave a gap the banner had counted.
+   */
+  const dropQueuedLiveLogs = useCallback(() => {
     if (flushTimerRef.current !== null) {
       clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
     }
     incomingBufferRef.current = [];
+  }, []);
+
+  /** Drops queued and held live logs, for a list that is replaced. */
+  const dropPendingLiveLogs = useCallback(() => {
+    dropQueuedLiveLogs();
     heldLiveRowsRef.current = [];
     heldRowsDroppedRef.current = false;
-  }, []);
+  }, [dropQueuedLiveLogs]);
 
   // In-flight query cancellation / stale response guard
   const fetchRequestIdRef = useRef<number>(0);
@@ -413,7 +422,7 @@ export function useLogBuffer({
       return;
     }
     const reqId = fetchRequestIdRef.current;
-    const listed = new Set(logsRef.current.map((l) => l.id));
+    const listed = new Set([...logsRef.current, ...heldLiveRowsRef.current].map((l) => l.id));
     const missed: LogEntry[] = [];
     const seen = new Set<number>();
     let joined = false;
@@ -646,6 +655,7 @@ export function useLogBuffer({
     applyFiltersNow,
     queueLiveLog,
     dropPendingLiveLogs,
+    dropQueuedLiveLogs,
     noteScrollActivity,
     endResumingToTop,
     pauseAutoScroll,
