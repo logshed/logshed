@@ -186,20 +186,23 @@ Create a token using the **Home Assistant** preset in **Settings > API & MCP Acc
 
 | Live Log Stream | Filtered Search |
 | :---: | :---: |
-| <a href="assets/logshed-logstream.png"><img src="assets/logshed-logstream.png" width="450" alt="Live console with syslog and Docker logs from several hosts"/></a> | <a href="assets/logshed-filter.png"><img src="assets/logshed-filter.png" width="450" alt="Console filtered to one host, warnings and worse, last 24 hours"/></a> |
-| *Syslog hosts and Docker containers from several machines in one real-time console* | *One host, warnings and worse, last 24 hours: disk, UPS and sync problems at a glance* |
+| <a href="assets/logshed-logstream.png"><img src="assets/logshed-logstream.png" width="450" alt="Live console with the log volume chart over a week, and syslog and Docker logs from several hosts"/></a> | <a href="assets/logshed-filter.png"><img src="assets/logshed-filter.png" width="450" alt="Console filtered to one host, warnings and worse, last 24 hours"/></a> |
+| *Syslog hosts and Docker containers from several machines in one real-time console, with a week of log volume above it* | *One host, warnings and worse, last 24 hours: disk, UPS and sync problems at a glance* |
 | **Log Detail & Surrounding Context** | **Sources: Syslog and Docker Hosts** |
-| <a href="assets/logshed-log-detail.png"><img src="assets/logshed-log-detail.png" width="450" alt="Log detail drawer for a failed Proxmox backup"/></a> | <a href="assets/logshed-sources.png"><img src="assets/logshed-sources.png" width="450" alt="Sources page with syslog host aliases and Docker hosts"/></a> |
-| *Structured fields, the raw log text, and the surrounding lines on demand* | *Friendly names and notes for syslog senders, plus Docker hosts over a socket proxy or mutual TLS* |
+| <a href="assets/logshed-log-detail.png"><img src="assets/logshed-log-detail.png" width="450" alt="Log detail drawer with a JSON log shown as a tree"/></a> | <a href="assets/logshed-sources.png"><img src="assets/logshed-sources.png" width="450" alt="Sources page with syslog host aliases and Docker hosts"/></a> |
+| *JSON logs as a tree you can open and copy from, beside the fields and the raw log text* | *Friendly names and notes for syslog senders, plus Docker hosts over a socket proxy or mutual TLS* |
 | **AI Redaction Preview** | **AI Diagnosis with Follow-up** |
 | <a href="assets/logshed-ai-redaction.png"><img src="assets/logshed-ai-redaction.png" width="450" alt="AI prompt preview with a password and a token shown as REDACTED"/></a> | <a href="assets/logshed-ai-analysis.png"><img src="assets/logshed-ai-analysis.png" width="450" alt="AI diagnosis with fix commands and a follow-up question"/></a> |
 | *Check the exact prompt before it is sent: passwords and tokens already read `[REDACTED]`* | *Root cause and fix commands from the model you choose, then follow-up questions on the same logs* |
 | **Alert Rules** | **Maintenance Windows** |
-| <a href="assets/logshed-alert-rules.png"><img src="assets/logshed-alert-rules.png" width="450" alt="Alert rules list with threshold and pattern rules"/></a> | <a href="assets/logshed-maintenance.png"><img src="assets/logshed-maintenance.png" width="450" alt="Active maintenance sessions from the web console and Home Assistant"/></a> |
-| *Threshold and pattern rules with AI enrichment, firing counts and drag-and-drop ordering* | *Overlapping sessions from the web console, Home Assistant, the API or MCP, plus recurring schedules* |
+| <a href="assets/logshed-alert-rules.png"><img src="assets/logshed-alert-rules.png" width="450" alt="Alert rules list with threshold and pattern rules"/></a> | <a href="assets/logshed-maintenance.png"><img src="assets/logshed-maintenance.png" width="450" alt="Two active maintenance sessions, one limited to a single host, and the recurring schedules"/></a> |
+| *Threshold and pattern rules with AI enrichment, firing counts and drag-and-drop ordering* | *Overlapping sessions from the web console, Home Assistant, the API or MCP, for every source or one host or app, plus recurring schedules* |
 | **Home Assistant** | **Mobile Console** |
 | <a href="assets/logshed-ha-dashboard.png"><img src="assets/logshed-ha-dashboard.png" height="467" alt="Home Assistant dashboard with LogShed sensors"/></a> | <a href="assets/logshed-mobile.png"><img src="assets/logshed-mobile.png" height="467" alt="Mobile console"/></a> |
 | *Error counts, alert state and a maintenance switch with the [LogShed Home Assistant integration](https://github.com/logshed/homeassistant-logshed)* | *Touch-friendly console for checking on things from a phone* |
+| **Storage & Retention** | **Drop Rules** |
+| <a href="assets/logshed-storage.png"><img src="assets/logshed-storage.png" width="450" alt="Storage page with the daily log files and their expiry dates, and two database backups"/></a> | <a href="assets/logshed-drop-rules.png"><img src="assets/logshed-drop-rules.png" width="450" alt="Drop rules with the number of logs each one has dropped"/></a> |
+| *One file per day of logs, deleted whole when it expires, and database backups before upgrades or on demand* | *Drop noisy lines before they are stored, with a count for each rule* |
 
 ---
 
