@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/logshed-demo.gif" width="960" alt="The LogShed console streaming syslog and Docker logs from opnsense, truenas, pve-node1 and docker-vm, then a search for smartd sdc narrowing them to one critical disk warning">
+  <img src="assets/logshed-demo.gif" width="960" alt="The LogShed console streaming syslog and Docker logs from opnsense, truenas, pve-node1 and docker-vm, then a search for smartd sdc narrowing the logs and the log volume chart to one critical disk warning">
 </p>
 
 ---
