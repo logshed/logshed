@@ -610,6 +610,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // The cursor is outlined only while the keyboard is in use: a key on the list shows it, a mouse
   // press on the list hides it. A mouse user who opens or ticks rows never sees it.
   const [cursorOutlined, setCursorOutlined] = useState<boolean>(false);
+  // Set by a mouse press on the list and cleared by any key but a lone modifier, or by leaving the
+  // list: while set, the list draws no focus ring. Chromium counts a lone Shift (held for a Shift-click
+  // range after ticking a row) as keyboard use, and would otherwise ring the whole list.
+  const [listMousePressed, setListMousePressed] = useState<boolean>(false);
   const cursorIndex = useMemo(
     () => (cursorLogId === null ? -1 : logs.findIndex((l) => l.id === cursorLogId)),
     [cursorLogId, logs],
@@ -622,6 +626,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   }, [activeLogDetail]);
 
   const handleListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) setListMousePressed(false);
     // Only keys pressed on the list itself, not on buttons inside it (such as the empty-state ones)
     if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey) return;
     const count = logs.length;
@@ -991,6 +996,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onMouseDown={() => {
             endResumingToTop();
             setCursorOutlined(false);
+            setListMousePressed(true);
+          }}
+          onBlur={(e) => {
+            if (e.target === e.currentTarget) setListMousePressed(false);
           }}
           // One Tab stop: the arrow, page, Home and End keys move the row cursor (handleListKeyDown)
           tabIndex={0}
@@ -999,7 +1008,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           aria-label="Log list"
           aria-multiselectable={logs.length > 0 ? true : undefined}
           aria-activedescendant={cursorRowRendered ? logRowId(logs[cursorIndex].id) : undefined}
-          className="group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-canvas relative overscroll-contain focus:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
+          className={`group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-canvas relative overscroll-contain focus:outline-hidden${
+            listMousePressed ? '' : ' focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500'
+          }`}
         >
           {emptyKind !== null ? (
             <ConsoleEmptyState

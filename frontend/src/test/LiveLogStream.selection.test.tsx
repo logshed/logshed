@@ -438,6 +438,27 @@ describe('Console selection and the log drawer', () => {
       expect(document.getElementById('log-row-102')!.className).not.toContain(ring);
     });
 
+    it('rings the list for keyboard focus, but not after a mouse press followed by a lone Shift', async () => {
+      // Chromium counts any key, Shift included, as keyboard use for :focus-visible, so a Shift held
+      // for a Shift-click range after ticking a row would ring the whole list
+      const list = await loadList();
+      const ring = 'focus-visible:ring-1';
+      expect(list.className).toContain(ring);
+      fireEvent.mouseDown(list);
+      fireEvent.click(within(document.getElementById('log-row-102')!).getByTestId('log-row-checkbox'));
+      expect(list.className).not.toContain(ring);
+      for (const modifier of ['Shift', 'Control', 'Alt', 'Meta']) key(list, modifier);
+      expect(list.className).not.toContain(ring);
+      // Any other key is keyboard use again
+      key(list, 'ArrowDown');
+      expect(list.className).toContain(ring);
+      fireEvent.mouseDown(list);
+      expect(list.className).not.toContain(ring);
+      // Leaving the list ends the mouse press, so a later Tab back rings it
+      fireEvent.blur(list);
+      expect(list.className).toContain(ring);
+    });
+
     it('leaves keys pressed with Ctrl, Meta or Alt alone', async () => {
       const list = await loadList();
       key(list, 'ArrowDown', { ctrlKey: true });
