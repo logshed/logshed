@@ -27,6 +27,9 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
   );
 };
 
+/** A letter or digit in any script: an underscore next to one is inside a word. */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
 /**
  * Parses inline Markdown tokens: `code`, **bold**, __bold__, *italic*, _italic_, [link](url)
  * Escapes raw HTML through React element mapping to ensure XSS safety.
@@ -37,6 +40,8 @@ export function renderInline(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let remaining = text;
   let keyIndex = 0;
+  // The last character already consumed, for the underscore rule below
+  let lastChar = '';
 
   // Match earliest inline markdown token
   const inlineRegex = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\([^)]+\))/;
@@ -54,6 +59,22 @@ export function renderInline(text: string): React.ReactNode[] {
     }
 
     const matchedToken = match[0];
+
+    // As in CommonMark, an underscore with a letter or digit on its outer side is part of a word, so
+    // snake_case names and paths such as /aiohttp/_websocket/writer_impl.py stay as written. The opening
+    // underscores are kept as text and the search goes on after them. (No regex lookbehind: Safari before
+    // 16.4 cannot parse one, and the whole bundle would fail to load.)
+    if (matchedToken.startsWith('_')) {
+      const before = match.index > 0 ? remaining[match.index - 1] : lastChar;
+      const after = remaining.charAt(match.index + matchedToken.length);
+      if (WORD_CHAR.test(before) || WORD_CHAR.test(after)) {
+        const opening = matchedToken.startsWith('__') ? 2 : 1;
+        nodes.push(remaining.substring(match.index, match.index + opening));
+        lastChar = '_';
+        remaining = remaining.substring(match.index + opening);
+        continue;
+      }
+    }
     const tokenKey = `inline-${keyIndex++}`;
 
     if (matchedToken.startsWith('`') && matchedToken.endsWith('`')) {
@@ -107,6 +128,7 @@ export function renderInline(text: string): React.ReactNode[] {
       nodes.push(matchedToken);
     }
 
+    lastChar = matchedToken.charAt(matchedToken.length - 1);
     remaining = remaining.substring(match.index + matchedToken.length);
   }
 

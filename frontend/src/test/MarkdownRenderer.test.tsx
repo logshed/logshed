@@ -22,6 +22,20 @@ describe('MarkdownRenderer Component', () => {
     expect(screen.queryByText('**not**')).toBeNull();
   });
 
+  it('keeps underscores inside words and paths literal, and still reads _italic_ and __bold__', () => {
+    // An AI answer naming /aiohttp/_websocket/writer_impl.py showed "websocket/writer" in italics
+    const { container } = render(
+      <MarkdownRenderer content={'See /aiohttp/_websocket/writer_impl.py and snake_case_name, then an _italic_ word, _start_, __bold__ and x__y__z.'} />
+    );
+    const ems = [...container.querySelectorAll('em')].map((e) => e.textContent);
+    const strongs = [...container.querySelectorAll('strong')].map((e) => e.textContent);
+    expect(ems).toEqual(['italic', 'start']);
+    expect(strongs).toEqual(['bold']);
+    expect(container.textContent).toContain('/aiohttp/_websocket/writer_impl.py');
+    expect(container.textContent).toContain('snake_case_name');
+    expect(container.textContent).toContain('x__y__z');
+  });
+
   it('lets long inline code and links break inside the box', () => {
     const { container } = render(
       <MarkdownRenderer content={'Raised `aiohttp.client_exceptions.ClientConnectionResetError` see [https://example.com/a/very/long/path](https://example.com/a/very/long/path)'} />
