@@ -29,6 +29,7 @@ import { Card, CardHeader } from '../common/Card.tsx';
 import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { Checkbox, LABEL_TEXT_CLASS, TextField } from '../common/Field.tsx';
 import { TableHead } from '../common/Table.tsx';
+import { useMediaQuery } from '../../utils/hooks.ts';
 
 /**
  * Notification targets, and the daily digest fields of the settings form: the digest values are
@@ -78,6 +79,8 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   const [testingChannelId, setTestingChannelId] = useState<number | null>(null);
 
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  // Below md each target is a stacked item, as the other tables do on a phone (API tokens, Docker hosts)
+  const isMobile = useMediaQuery('(max-width: 767px)');
 
   const loadChannels = useCallback(async () => {
     try {
@@ -227,6 +230,51 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
     }
   };
 
+  const statusToggle = (channel: NotificationChannel) => (
+    <button
+      type="button"
+      onClick={() => handleToggleStatus(channel)}
+      className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition cursor-pointer ${
+        channel.is_enabled
+          ? 'bg-success-950 text-success-400 border border-success-800'
+          : 'bg-raised text-fg-muted border border-line'
+      }`}
+      title={channel.is_enabled ? 'Click to disable' : 'Click to enable'}
+    >
+      {channel.is_enabled ? 'Active' : 'Disabled'}
+    </button>
+  );
+
+  const rowActions = (channel: NotificationChannel) => (
+    <div className="flex items-center justify-end gap-1.5 shrink-0">
+      <IconButton
+        size="sm"
+        onClick={() => handleRowTest(channel)}
+        disabled={testingChannelId === channel.id}
+        title="Send test notification"
+        label={`Test ${channel.name}`}
+      >
+        <Send
+          className={`w-3.5 h-3.5 ${
+            testingChannelId === channel.id ? 'animate-pulse text-accent-400' : ''
+          }`}
+        />
+      </IconButton>
+      <IconButton size="sm" onClick={() => handleOpenEditModal(channel)} title="Edit target" label={`Edit ${channel.name}`}>
+        <Edit2 className="w-3.5 h-3.5" />
+      </IconButton>
+      <IconButton
+        size="sm"
+        variant="danger"
+        onClick={() => setChannelToDelete(channel)}
+        title="Delete target"
+        label={`Delete ${channel.name}`}
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </IconButton>
+    </div>
+  );
+
   return (
     <>
     <Card>
@@ -256,11 +304,29 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
 
       <FeedbackBanner feedback={feedbackMsg} onDismiss={() => setFeedbackMsg(null)} />
 
-      {/* Content Table */}
+      {/* Content: a stacked list on a phone, a table that fits the card on a computer */}
       <div className="overflow-x-auto rounded-lg border border-line-subtle">
           {channels.length === 0 ? (
             <div className="text-center py-6 text-fg-muted text-xs italic bg-canvas/40">
               No notification targets configured. Add a target to receive alerts on Discord, Gotify, Telegram, or other services.
+            </div>
+          ) : isMobile ? (
+            <div className="divide-y divide-line-subtle text-xs" role="list" aria-label="Notification targets">
+              {channels.map((channel) => (
+                <div key={channel.id} className="p-3 space-y-2" role="listitem">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-fg-strong min-w-0 wrap-anywhere">{channel.name}</span>
+                      {statusToggle(channel)}
+                    </div>
+                    {rowActions(channel)}
+                  </div>
+                  {/* Wraps rather than being cut short: a phone has no hover to show the rest */}
+                  <div className="font-mono text-[11px] text-fg-muted break-all">
+                    {channel.url}
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
@@ -278,55 +344,17 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                     key={channel.id}
                     className="hover:bg-raised/40 transition group"
                   >
-                    <td className="py-2 px-4">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatus(channel)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition cursor-pointer ${
-                          channel.is_enabled
-                            ? 'bg-success-950 text-success-400 border border-success-800'
-                            : 'bg-raised text-fg-muted border border-line'
-                        }`}
-                        title={channel.is_enabled ? 'Click to disable' : 'Click to enable'}
-                      >
-                        {channel.is_enabled ? 'Active' : 'Disabled'}
-                      </button>
+                    <td className="py-2 px-4 whitespace-nowrap">{statusToggle(channel)}</td>
+                    <td className="py-2 px-4 font-mono text-fg whitespace-nowrap">
+                      <span className="block max-w-48 truncate" title={channel.name}>
+                        {channel.name}
+                      </span>
                     </td>
-                    <td className="py-2 px-4 font-mono text-fg">
-                      {channel.name}
-                    </td>
-                    <td className="py-2 px-4 font-mono text-fg-muted max-w-[250px] truncate" title={channel.url}>
+                    {/* Takes the width the other columns leave (max-w-0 w-full), so the table fits its card */}
+                    <td className="py-2 px-4 font-mono text-fg-muted max-w-0 w-full truncate" title={channel.url}>
                       {channel.url}
                     </td>
-                    <td className="py-2 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <IconButton
-                          size="sm"
-                          onClick={() => handleRowTest(channel)}
-                          disabled={testingChannelId === channel.id}
-                          title="Send test notification"
-                          label={`Test ${channel.name}`}
-                        >
-                          <Send
-                            className={`w-3.5 h-3.5 ${
-                              testingChannelId === channel.id ? 'animate-pulse text-accent-400' : ''
-                            }`}
-                          />
-                        </IconButton>
-                        <IconButton size="sm" onClick={() => handleOpenEditModal(channel)} title="Edit target" label={`Edit ${channel.name}`}>
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </IconButton>
-                        <IconButton
-                          size="sm"
-                          variant="danger"
-                          onClick={() => setChannelToDelete(channel)}
-                          title="Delete target"
-                          label={`Delete ${channel.name}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </IconButton>
-                      </div>
-                    </td>
+                    <td className="py-2 px-4 text-right">{rowActions(channel)}</td>
                   </tr>
                 ))}
               </tbody>

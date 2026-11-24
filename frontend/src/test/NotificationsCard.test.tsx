@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NotificationsCard } from '../components/settings/NotificationsCard.tsx';
 import * as notifApi from '../api/notifications.ts';
@@ -393,5 +393,58 @@ describe('NotificationsCard action buttons', () => {
       expect(btn.className).toContain('max-md:min-w-8 max-md:min-h-8');
     }
     expect(edit.parentElement!.className).toContain('gap-1.5');
+  });
+});
+
+describe('NotificationsCard layout', () => {
+  const channel = {
+    id: 1,
+    name: 'Homelab Discord',
+    url: 'discord://1234567890123456789/abcdefghijklmnopqrstuvwxyz0123456789',
+    is_enabled: true,
+    created_at: '2026-09-18T12:00:00Z',
+    updated_at: '2026-09-18T12:00:00Z',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('fits the table to its card on a computer: the URL takes the width left and is cut short with the full text on hover', async () => {
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValueOnce([channel]);
+    render(<DigestHarness />);
+    const url = await screen.findByText(channel.url);
+    expect(url.tagName).toBe('TD');
+    expect(url.className).toContain('max-w-0 w-full truncate');
+    expect(url).toHaveAttribute('title', channel.url);
+  });
+
+  it('stacks each target on a phone, as the other settings tables do, with no table to scroll sideways', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query === '(max-width: 767px)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValueOnce([channel]);
+    vi.mocked(notifApi.updateNotificationChannel).mockResolvedValueOnce({ ...channel, is_enabled: false });
+    render(<DigestHarness />);
+    const list = await screen.findByRole('list', { name: 'Notification targets' });
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const item = within(list).getByRole('listitem');
+    expect(item).toHaveTextContent('Homelab Discord');
+    // The whole masked URL is shown, wrapped: a phone has no hover for a title
+    expect(within(item).getByText(channel.url).className).toContain('break-all');
+    for (const name of ['Test Homelab Discord', 'Edit Homelab Discord', 'Delete Homelab Discord']) {
+      expect(within(item).getByRole('button', { name })).toBeInTheDocument();
+    }
+    fireEvent.click(within(item).getByText('Active'));
+    await waitFor(() => expect(within(item).getByText('Disabled')).toBeInTheDocument());
+    expect(notifApi.updateNotificationChannel).toHaveBeenCalledWith(1, { is_enabled: false });
+    media.mockRestore();
   });
 });
