@@ -22,6 +22,14 @@ describe('MarkdownRenderer Component', () => {
     expect(screen.queryByText('**not**')).toBeNull();
   });
 
+  it('lets long inline code and links break inside the box', () => {
+    const { container } = render(
+      <MarkdownRenderer content={'Raised `aiohttp.client_exceptions.ClientConnectionResetError` see [https://example.com/a/very/long/path](https://example.com/a/very/long/path)'} />
+    );
+    // The root carries overflow-wrap: anywhere, which inline code and links inherit
+    expect(container.firstElementChild?.className).toContain('wrap-anywhere');
+  });
+
   it('renders numbered lists with bold step titles and fenced code blocks', () => {
     const markdown = `1. **Inspect Document 33 in Paperless-ngx:**
    Verify whether the tag \`paperless-gpt-failed\` was applied.

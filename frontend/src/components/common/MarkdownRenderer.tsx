@@ -98,7 +98,7 @@ export function renderInline(text: string): React.ReactNode[] {
           href={safeHref}
           target={safeHref === '#' ? undefined : '_blank'}
           rel="noopener noreferrer"
-          className="text-accent-400 hover:underline"
+          className="text-accent-400 underline underline-offset-2 hover:text-accent-300"
         >
           {renderInline(linkText)}
         </a>
@@ -455,5 +455,6 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
     }
   };
 
-  return <div className={`space-y-1 ${className}`}>{blocks.map((block, idx) => renderBlock(block, idx))}</div>;
+  // wrap-anywhere: a long inline code name, link or path breaks inside the box instead of running past it on a phone
+  return <div className={`space-y-1 wrap-anywhere ${className}`}>{blocks.map((block, idx) => renderBlock(block, idx))}</div>;
 };
