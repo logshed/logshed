@@ -321,8 +321,9 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                   <RuleOrderControls ruleId={rule.id} index={index} count={rules.length} onMove={moveItem} />
 
                   <div className="space-y-1.5 min-w-0 flex-1">
+                    {/* The name has a line of its own and wraps anywhere, so the badges always start the next row */}
+                    <div className="text-xs font-medium text-fg wrap-anywhere">{ruleDisplayName}</div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-medium text-fg">{ruleDisplayName}</span>
                       <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-mono uppercase bg-raised text-fg-soft border border-line-hover">
                         {rule.is_regex ? 'Regex' : 'Substring'}
                       </span>

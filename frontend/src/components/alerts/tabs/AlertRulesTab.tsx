@@ -250,8 +250,9 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     <RuleOrderControls ruleId={rule.id} index={index} count={rules.length} onMove={moveItem} />
 
                     <div className="space-y-1.5 min-w-0 flex-1">
+                      {/* The name has a line of its own and wraps anywhere, so the badges always start the next row */}
+                      <div className="text-xs font-medium text-fg wrap-anywhere">{rule.name}</div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-medium text-fg">{rule.name}</span>
                       <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-mono uppercase bg-raised text-fg-soft border border-line-hover">
                         {rule.rule_type}
                       </span>
@@ -270,12 +271,12 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
                       {rule.filter_host && (
-                        <span>
+                        <span className="wrap-break-word min-w-0">
                           Host: <span className="font-mono text-fg-soft">{rule.filter_host}</span>
                         </span>
                       )}
                       {rule.filter_app && (
-                        <span>
+                        <span className="wrap-break-word min-w-0">
                           App: <span className="font-mono text-fg-soft">{rule.filter_app}</span>
                         </span>
                       )}
