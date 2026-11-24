@@ -217,7 +217,7 @@ LogShed provides an integrated Model Context Protocol (MCP) server that enables 
   * `logshed://alerts/active`: Maintenance state (`maintenance_active`, `maintenance_until`, `log_handling`) and the 5 most recent incidents.
 * **Prompts Exposed:**
   * `investigate_incident`: Step-by-step diagnostic workflow guiding AI agents through metrics inspection, log search, context retrieval, alert history, and root-cause determination (arguments `app_name`, `time_window`).
-  * `safe_service_upgrade`: Deployment workflow that checks a service's logs, starts a `drop_errors` maintenance window targeted at it, verifies clean startup logs, and ends the window (arguments `service_name`, `duration_minutes`).
+  * `safe_service_upgrade`: Deployment workflow that checks a service's logs, starts a `silence_alerts` maintenance window targeted at it (logs are kept), looks for errors from it since the window started (`query_logs` with `severity_max=3` and `from_time` set to the session's `server_time`) and reads their context with `get_log_context`, checks the newest lines for a clean start, and ends the window (arguments `service_name`, `duration_minutes`).
 
 ### 3.2 AI Stream Event Payloads
 `POST /api/ai/diagnose/stream` and `POST /api/ai/audit/{audit_id}/follow-up/stream` return `text/event-stream`. Every event is one `data:` line holding a JSON object whose `stage` field names the event. The server also sends an SSE comment line, `: ping`, every 15 seconds while a model call is quiet, so reverse proxies do not close the connection; clients ignore it.

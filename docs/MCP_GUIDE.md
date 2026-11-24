@@ -272,7 +272,7 @@ In addition to tools, LogShed exposes read-only MCP resources and investigation 
   3. Fetching surrounding log context for the most critical or recurring errors.
   4. Checking related alert firings.
   5. Reporting the root cause with recommended remediation steps.
-- `safe_service_upgrade` (`service_name`, optional `duration_minutes` default 30): A deployment workflow that checks the service's recent logs, starts a `drop_errors` maintenance window targeted at the service, waits for the upgrade, verifies clean startup logs, and ends the maintenance window.
+- `safe_service_upgrade` (`service_name`, optional `duration_minutes` default 30): A deployment workflow that checks the service's recent logs, starts a `silence_alerts` maintenance window targeted at the service (alerts stay quiet, every log is kept), waits for the upgrade, looks for errors from the service since the window started (`severity_max=3`) and reads their context, checks the newest lines for a clean start, and ends the maintenance window. Any error it finds is reported, and the upgrade is not called healthy.
 
 ---
 

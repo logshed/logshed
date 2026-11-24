@@ -997,6 +997,13 @@ class TestMCPServer:
         assert "traefik" in prompt2
         assert "enable_maintenance" in prompt2
         assert "disable_maintenance" in prompt2
+        # Errors from the upgrade must be kept and looked for (BL-192): drop_errors would discard them at ingest
+        assert "drop_errors" not in prompt2
+        assert "log_handling='silence_alerts'" in prompt2
+        assert "query_logs(apps=['traefik'], severity_max=3, from_time=<server_time>" in prompt2
+        assert "get_log_context" in prompt2
+        assert "error filtering" not in safe_upgrade.description
+        assert "silenc" in safe_upgrade.description
 
 
 class TestMCPApiAndTransport:

@@ -638,8 +638,9 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
     @server.prompt(
         name="safe_service_upgrade",
         description=(
-            "Standard workflow for external deployment agents: checks service health, enables maintenance "
-            "window with error filtering, directs deployment steps, verifies log startup, and closes maintenance."
+            "Standard workflow for external deployment agents: checks service health, starts a maintenance "
+            "window that silences alerts while keeping every log, directs deployment steps, checks the logs "
+            "written since for errors, and closes maintenance."
         ),
     )
     def safe_service_upgrade(
@@ -647,18 +648,25 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         duration_minutes: int = 30,
     ) -> str:
         """Safe service upgrade workflow prompt template."""
+        # silence_alerts, never drop_errors: dropped errors are never stored, so step 4 could not see them (BL-192)
         return (
             f"You are executing a safe service upgrade workflow for service '{service_name}'.\n\n"
             "Execute the upgrade in the following sequential order:\n"
             f"1. Check pre-upgrade logs and health for '{service_name}' using `query_logs(apps=['{service_name}'], limit=20)`.\n"
-            f"2. Silence alerts and prevent noisy deployment errors by starting a maintenance session:\n"
-            f"   `enable_maintenance(duration_minutes={duration_minutes}, target_app='{service_name}', log_handling='drop_errors', reason='Deploying upgrade for {service_name}')`\n"
-            "   Save the returned `session_id`.\n"
+            "2. Silence alerts for the upgrade by starting a maintenance session. Its logs are still stored, "
+            "so any error from the upgrade can be found afterwards:\n"
+            f"   `enable_maintenance(duration_minutes={duration_minutes}, target_app='{service_name}', log_handling='silence_alerts', reason='Deploying upgrade for {service_name}')`\n"
+            "   Save the returned `session_id` and `server_time` (when the session started).\n"
             f"3. Proceed with deploying or restarting the '{service_name}' container or service.\n"
-            f"4. Verify clean startup logs with `query_logs(apps=['{service_name}'], limit=30)` to ensure absence of fatal errors.\n"
-            "5. Close the maintenance session immediately after verifying success:\n"
+            f"4. Look for errors written since the session started:\n"
+            f"   `query_logs(apps=['{service_name}'], severity_max=3, from_time=<server_time>, limit=50)`\n"
+            "   If it returns any, read the context of the first ones with `get_log_context(log_id=<id>, same_app=True)`, "
+            "report them, and do not call the upgrade healthy. "
+            f"Then check the newest lines of any level with `query_logs(apps=['{service_name}'], limit=20)` "
+            "to see that the service started cleanly.\n"
+            "5. Close the maintenance session once the checks are done:\n"
             "   `disable_maintenance(session_id=<session_id>)`.\n"
-            f"6. Provide a final summary confirming that '{service_name}' is healthy."
+            f"6. Provide a final summary: whether '{service_name}' is healthy, and any errors found in step 4."
         )
 
     return server
