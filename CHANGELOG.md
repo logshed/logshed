@@ -40,7 +40,7 @@ Read these before updating from 1.3.x. The first start backs up the database wit
 - **Database backups**: LogShed backs up the database before every upgrade that changes it (turn this off on the Storage page or with `AUTO_BACKUP_ON_MIGRATION=false`). The Storage page lists, downloads, deletes and makes backups, and `python -m app.cli backup` makes one. Backups are kept 30 days.
 - **Restore command**: `python -m app.cli restore <archive>`, run while LogShed is stopped, checks a backup and puts it in place, keeping the replaced files.
 - **Upgrade progress and recovery mode**: The web interface shows the upgrade's progress. If the backup or upgrade fails, LogShed notifies you and waits, receiving no logs and not retrying on a restart, until you choose to retry, upgrade without a backup or go back; `reset-admin` works meanwhile.
-- **Log Files on the Storage page**: Each day's file, with its size and when retention deletes it.
+- **Log Files on the Storage page**: How many days are kept, their size and when the oldest is deleted; open it for each day's file, with its size and when retention deletes it.
 - **Export and import the whole configuration**: Settings > Advanced saves every setting, rule and list to a JSON file (secrets only if you choose, under a password) and imports the sections you tick.
 - **OpenRouter as an AI provider**, with prices and context sizes; every provider's model list can be searched.
 - **Metrics API**: `/api/v1/system/metrics` and MCP give when each source last sent a log and the newest backup, for Home Assistant integration 1.1.0.

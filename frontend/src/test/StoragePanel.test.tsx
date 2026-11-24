@@ -49,7 +49,7 @@ describe('StoragePanel Component', () => {
     expect(await screen.findByText('No backups yet.')).toBeInTheDocument();
   });
 
-  it('lists the day files between the retention card and the backups card', async () => {
+  it('lists the day files below the trend chart, above Targeted Log Deletion', async () => {
     vi.spyOn(systemApi, 'fetchStorageMetrics').mockResolvedValue({
       db_size_bytes: 3 * 1024 ** 3,
       main_db_size_bytes: 1024 ** 3,
@@ -66,9 +66,10 @@ describe('StoragePanel Component', () => {
     render(<StoragePanel />);
     const card = await screen.findByTestId('log-files-card');
     expect(screen.getByTestId('db-split-display')).toHaveTextContent('logs.db 1 GB + 2 day files 2 GB');
-    const retention = screen.getByText(/Log Retention Policy/i);
-    expect(retention.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(card.compareDocumentPosition(screen.getByTestId('database-backups-card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const following = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(following(screen.getByTestId('database-backups-card'), card)).toBe(true);
+    expect(following(screen.getByText('30-Day Storage & Volume Trend'), card)).toBe(true);
+    expect(following(card, screen.getByText('Targeted Log Deletion'))).toBe(true);
   });
 
   it('renders storage metrics, retention slider, and storage trend chart', async () => {

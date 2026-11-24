@@ -25,6 +25,8 @@ const LEGACY: LogFileItem = {
   expires_at: '2026-11-26T09:15:00+00:00',
 };
 
+const openList = () => fireEvent.click(screen.getByRole('button', { name: 'Show the day files' }));
+
 function days(count: number): LogFileItem[] {
   const day = (i: number) => new Date(Date.parse('2026-11-13T00:00:00Z') - i * 86400_000).toISOString().slice(0, 10);
   return Array.from({ length: count }, (_v, i) => dayFile(day(i), i === 0 ? 'open' : 'sealed'));
@@ -39,6 +41,7 @@ describe('LogFilesCard', () => {
 
   it('lists the newest days first with logs, size, state and expiry in server time', async () => {
     render(<LogFilesCard files={days(3)} retentionDays={14} />);
+    openList();
     const rows = within(screen.getByRole('table', { name: 'Log files' })).getAllByRole('row').slice(1);
     expect(rows.map((r) => within(r).getAllByRole('cell')[0].firstChild?.textContent)).toEqual(['2026-11-13', '2026-11-12', '2026-11-11']);
     expect(within(rows[0]).getByText('open')).toBeInTheDocument();
@@ -51,12 +54,14 @@ describe('LogFilesCard', () => {
 
   it('shows the expiry in the server zone, not UTC, in summer', async () => {
     render(<LogFilesCard files={[dayFile('2026-07-01')]} />);
+    openList();
     // 00:00 UTC on 16 July is 01:00 in London (BST)
-    await waitFor(() => expect(screen.getByText('2026-07-16 01:00')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByRole('table', { name: 'Log files' })).getByText('2026-07-16 01:00')).toBeInTheDocument());
   });
 
   it('shows seven days and the rest on request', () => {
     render(<LogFilesCard files={days(15)} />);
+    openList();
     const table = screen.getByRole('table', { name: 'Log files' });
     expect(within(table).getAllByRole('row')).toHaveLength(LOG_FILES_SHOWN + 1);
     fireEvent.click(screen.getByRole('button', { name: 'Show all 15' }));
@@ -65,13 +70,42 @@ describe('LogFilesCard', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(LOG_FILES_SHOWN + 1);
   });
 
-  it('has no button when every day fits', () => {
+  it('has no Show all button when every day fits', () => {
     render(<LogFilesCard files={days(LOG_FILES_SHOWN)} />);
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    openList();
+    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+  });
+
+  it('starts closed, with a summary of the days, their size and when the oldest goes', async () => {
+    render(<LogFilesCard files={[...days(30), LEGACY]} retentionDays={30} />);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    expect(screen.getByText('30 days')).toBeInTheDocument();
+    const summary = screen.getByTestId('log-files-summary');
+    // 30 files of 2 MB; the oldest is the last in the list, 29 days before 13 Nov
+    expect(summary).toHaveTextContent('60 MB in day files.');
+    await waitFor(() => expect(summary).toHaveTextContent('The oldest day, 2026-10-15, expires at 2026-10-30 00:00.'));
+    await waitFor(() => expect(summary).toHaveTextContent('Logs from before 1.4.0: 1,204,551 in logs.db, all gone by 2026-11-26 09:15.'));
+    const toggle = screen.getByRole('button', { name: 'Show the day files' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Hide the day files' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(screen.getByRole('table', { name: 'Log files' })).getAllByRole('row')).toHaveLength(LOG_FILES_SHOWN + 2);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the day files' }));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('summarises only the logs from before 1.4.0 when there are no day files yet', async () => {
+    render(<LogFilesCard files={[LEGACY]} />);
+    const summary = screen.getByTestId('log-files-summary');
+    expect(summary).not.toHaveTextContent('in day files');
+    expect(screen.queryByText(/\d+ days?$/)).not.toBeInTheDocument();
+    await waitFor(() => expect(summary).toHaveTextContent('Logs from before 1.4.0: 1,204,551 in logs.db, all gone by 2026-11-26 09:15.'));
   });
 
   it('ends with the logs from before 1.4.0 while any are left, always shown', async () => {
     render(<LogFilesCard files={[...days(10), LEGACY]} />);
+    openList();
     const row = screen.getByTestId('legacy-row');
     expect(row).toHaveTextContent('Before 1.4.0');
     expect(row).toHaveTextContent('1,204,551');
@@ -92,6 +126,7 @@ describe('LogFilesCard', () => {
       dispatchEvent: vi.fn(),
     }));
     render(<LogFilesCard files={[...days(10), LEGACY]} />);
+    openList();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     const list = screen.getByRole('list', { name: 'Log files' });
     const items = within(list).getAllByRole('listitem');

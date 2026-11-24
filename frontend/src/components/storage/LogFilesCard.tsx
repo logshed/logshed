@@ -4,11 +4,11 @@ import { LogFileItem } from '../../types.ts';
 import { formatBytes, formatLocalTimestamp } from '../../utils/formatters.ts';
 import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
 import { Badge, BadgeTone } from '../common/Badge.tsx';
-import { Button } from '../common/Button.tsx';
+import { Button, DisclosureButton } from '../common/Button.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
 import { TableHead } from '../common/Table.tsx';
 
-/** Rows shown before "Show all". */
+/** Rows shown, once the list is open, before "Show all". */
 export const LOG_FILES_SHOWN = 7;
 
 const STATES: Record<string, { label: string; tone: BadgeTone; title: string }> = {
@@ -31,9 +31,14 @@ interface LogFilesCardProps {
   retentionDays?: number | null;
 }
 
-/** The Storage page's list of day files: one per UTC day, deleted whole by retention. */
+/**
+ * The Storage page's list of day files: one per UTC day, deleted whole by retention. It starts closed,
+ * as a summary (the day files' size, when the oldest expires, the logs left from before 1.4.0), so a
+ * long retention does not make the page long; the list opens under it.
+ */
 export const LogFilesCard: React.FC<LogFilesCardProps> = ({ files, retentionDays }) => {
   const serverTimezone = useServerTimezone();
+  const [open, setOpen] = useState<boolean>(false);
   const [showAll, setShowAll] = useState<boolean>(false);
   // Below md the rows are stacked, as the other tables do on a phone (API tokens, Docker hosts)
   const isMobile = useMediaQuery('(max-width: 767px)');
@@ -43,6 +48,8 @@ export const LogFilesCard: React.FC<LogFilesCardProps> = ({ files, retentionDays
   const legacy = files.find((f) => f.state === 'legacy');
   const shown = showAll ? days : days.slice(0, LOG_FILES_SHOWN);
   const expires = (f: LogFileItem) => (f.expires_at ? formatLocalTimestamp(f.expires_at, false, serverTimezone) : '');
+  const oldest = days[days.length - 1];
+  const totalBytes = days.reduce((sum, f) => sum + (f.size_bytes ?? 0), 0);
 
   return (
     <Card data-testid="log-files-card">
@@ -50,9 +57,11 @@ export const LogFilesCard: React.FC<LogFilesCardProps> = ({ files, retentionDays
         title={
           <span className="inline-flex flex-wrap items-center gap-2">
             Log Files
-            <Badge code>
-              {days.length} {days.length === 1 ? 'day' : 'days'}
-            </Badge>
+            {days.length > 0 && (
+              <Badge code>
+                {days.length} {days.length === 1 ? 'day' : 'days'}
+              </Badge>
+            )}
           </span>
         }
         icon={<CalendarDays />}
@@ -62,7 +71,38 @@ export const LogFilesCard: React.FC<LogFilesCardProps> = ({ files, retentionDays
           `so a log can be kept up to a day longer. Expiry times are in the server's time zone.`
         }
       />
-      {isMobile ? (
+      <div className="space-y-1 text-xs text-fg-muted" data-testid="log-files-summary">
+        {oldest && (
+          <p>
+            <span className="font-mono text-fg-soft">{formatBytes(totalBytes)}</span> in day files.{' '}
+            {oldest.expires_at && (
+              <>
+                The oldest day, <span className="font-mono text-fg-soft">{oldest.day}</span>, expires at{' '}
+                <span className="font-mono text-fg-soft">{expires(oldest)}</span>.
+              </>
+            )}
+          </p>
+        )}
+        {legacy && (
+          <p>
+            Logs from before 1.4.0: <span className="font-mono text-fg-soft">{legacy.logs.toLocaleString()}</span> in
+            logs.db
+            {legacy.expires_at && (
+              <>
+                , all gone by <span className="font-mono text-fg-soft">{expires(legacy)}</span>
+              </>
+            )}
+            .
+          </p>
+        )}
+      </div>
+      {/* The text size and colour come from here: a component's className is for layout only */}
+      <div className="text-xs text-fg-soft">
+        <DisclosureButton open={open} onToggle={() => setOpen((v) => !v)} className="max-md:min-h-8">
+          {open ? 'Hide the day files' : 'Show the day files'}
+        </DisclosureButton>
+      </div>
+      {open && (isMobile ? (
         <div className="border border-line rounded-lg divide-y divide-line-subtle text-xs" role="list" aria-label="Log files">
           {shown.map((f) => (
             <div key={f.day} className="p-3 space-y-1.5" role="listitem">
@@ -139,8 +179,8 @@ export const LogFilesCard: React.FC<LogFilesCardProps> = ({ files, retentionDays
             </tbody>
           </table>
         </div>
-      )}
-      {days.length > LOG_FILES_SHOWN && (
+      ))}
+      {open && days.length > LOG_FILES_SHOWN && (
         <div>
           <Button variant="secondary" size="sm" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}>
             {showAll ? 'Show fewer' : `Show all ${days.length}`}

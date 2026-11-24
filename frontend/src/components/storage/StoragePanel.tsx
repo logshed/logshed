@@ -114,8 +114,6 @@ export const StoragePanel: React.FC = () => {
           />
         )}
 
-        <LogFilesCard files={storageMetrics?.log_files ?? []} retentionDays={storageMetrics?.retention_days} />
-
         <DatabaseBackupsCard
           backupBeforeMigration={backupBeforeMigration}
           backupBeforeMigrationOverridden={backupOverridden}
@@ -124,6 +122,9 @@ export const StoragePanel: React.FC = () => {
         />
 
         <StorageTrendChart history={storageMetrics?.history || []} />
+
+        {/* Reference more than a control, so it sits low on the page, beside deleting logs */}
+        <LogFilesCard files={storageMetrics?.log_files ?? []} retentionDays={storageMetrics?.retention_days} />
 
         <DeleteLogsCard onLogsDeleted={loadAllData} />
       </section>
