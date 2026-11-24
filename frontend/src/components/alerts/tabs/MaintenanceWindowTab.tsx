@@ -221,12 +221,13 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               <div className="divide-y divide-line-subtle border border-line-subtle rounded-lg overflow-hidden bg-canvas/40">
                 {maintenance.sessions.map((sess) => (
                   <div key={sess.session_id} className="p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-fg">
+                        {/* A reason with no spaces (from the API or MCP too) wraps instead of running past the row */}
+                        <span className="font-semibold text-fg min-w-0 wrap-anywhere">
                           {sess.reason || 'On-Demand Session'}
                         </span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                        <span className={`shrink-0 whitespace-nowrap px-2 py-0.5 rounded text-[10px] font-medium ${
                           sess.log_handling === 'drop_errors'
                             ? 'bg-warning-950/60 border border-warning-800 text-warning-300'
                             : 'bg-info-950/60 border border-info-800 text-info-300'
@@ -323,7 +324,8 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                 >
                   <div className="space-y-1 min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-medium text-fg">{sched.name}</span>
+                      {/* A long name with no spaces wraps instead of running past the card, as the rule names do */}
+                      <span className="text-xs font-medium text-fg min-w-0 wrap-anywhere">{sched.name}</span>
                       {sched.is_active && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-warning-500/20 text-warning-300 border border-warning-500/40 animate-pulse">
                           Active Now

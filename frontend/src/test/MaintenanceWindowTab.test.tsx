@@ -105,6 +105,23 @@ describe('MaintenanceWindowTab', () => {
     expect(handlers.onDisableSession).toHaveBeenCalledWith('aaaa1111bbbb');
   });
 
+  it('lets a long schedule name and session reason with no spaces wrap instead of running past the card', () => {
+    const name = 'Nightly_backup_window_for_my_very_long_container_name_on_the_storage_host';
+    const reason = 'Deploying_upgrade_for_my_very_long_container_name_on_the_storage_host';
+    renderTab({
+      maintenance: {
+        ...MAINTENANCE,
+        schedules: [schedule({ id: 'long', name })],
+        sessions: [{ ...MAINTENANCE.sessions![0], reason }],
+      },
+    });
+    for (const text of [name, reason]) {
+      const el = screen.getByText(text);
+      expect(el.className).toContain('wrap-anywhere');
+      expect(el.className).toContain('min-w-0');
+    }
+  });
+
   it('offers no Stop Session without a handler', () => {
     renderTab({ onDisableSession: undefined });
     expect(screen.queryByRole('button', { name: 'Stop Session' })).toBeNull();
