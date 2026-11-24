@@ -292,3 +292,16 @@ input[type="time"]::-webkit-calendar-picker-indicator {
     background-color: CanvasText;
   }
 }
+
+/* After a mouse or touch press, a lone Shift, Ctrl, Alt or Meta does not outline what was clicked
+   (utils/pointerFocus.ts: Chromium counts those keys as keyboard use for :focus-visible). Unlayered and
+   !important, so it beats the utilities; any other key removes the attribute. Text fields (:read-write)
+   are left alone: they match :focus-visible from the click itself, and their focus style must show then
+   (in forced colours Tailwind's outline-hidden leaves an outline that is their only one). Only rings that
+   exist for keyboard focus (focus-visible:ring) are hidden; focus:ring rings show on a click and stay. */
+:root[data-pointer-focus] :focus-visible:not(:read-write) {
+  outline-style: none !important;
+}
+:root[data-pointer-focus] [class*='focus-visible:ring']:focus-visible:not(:read-write) {
+  --tw-ring-shadow: 0 0 #0000 !important;
+}

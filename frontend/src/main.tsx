@@ -5,8 +5,10 @@ import { App } from './App.tsx';
 import { StartupGate } from './components/recovery/StartupGate.tsx';
 import './index.css';
 import { preventIosFocusZoom } from './utils/iosViewport.ts';
+import { hideFocusAfterPointerModifiers } from './utils/pointerFocus.ts';
 
 preventIosFocusZoom();
+hideFocusAfterPointerModifiers();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
