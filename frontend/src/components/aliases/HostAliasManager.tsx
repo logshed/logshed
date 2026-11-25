@@ -8,7 +8,6 @@ import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
 import { Button, IconButton } from '../common/Button.tsx';
 import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
-import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { Badge } from '../common/Badge.tsx';
 import { TABLE_HEAD_ROW } from '../common/Table.tsx';
 import { LastSeen } from '../common/LastSeen.tsx';
@@ -214,7 +213,6 @@ export const HostAliasManager: React.FC = () => {
           icon={<Server />}
           title="Syslog Host Aliases"
           description="Map incoming syslog source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall). A host without an alias appears in the Console by the name it sends itself, listed below as self-reported, or by its IP address."
-          note={<SaveModeNote mode="instant" />}
           actions={
             <Button variant="primary" onClick={openAddModal} icon={<Plus className="w-3.5 h-3.5" />}>
               Add Host Alias

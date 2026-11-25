@@ -26,7 +26,6 @@ import { FeedbackBanner, type Feedback } from './FeedbackBanner.tsx';
 import { Badge } from '../common/Badge.tsx';
 import { Button, IconButton } from '../common/Button.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
-import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { Checkbox, LABEL_TEXT_CLASS, TextField } from '../common/Field.tsx';
 import { TableHead } from '../common/Table.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
@@ -289,7 +288,6 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           </>
         }
         description="Dispatch real-time alerts across 80+ platforms (Discord, Gotify, Telegram, Ntfy, Pushover, Home Assistant, Slack, Email) using standard webhook URLs. Sensitive tokens are encrypted at rest."
-        note={<SaveModeNote mode="instant" />}
         actions={
           <Button
             size="sm"

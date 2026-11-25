@@ -32,7 +32,6 @@ import { McpAccessCard } from './McpAccessCard.tsx';
 import { Badge } from '../common/Badge.tsx';
 import { Button } from '../common/Button.tsx';
 import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
-import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { Field, LABEL_CLASS, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
 import { Modal } from '../common/Modal.tsx';
@@ -266,7 +265,6 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </code>
             </>
           }
-          note={<SaveModeNote mode="instant" />}
           actions={
             <Button variant="primary" onClick={handleOpenGenerateModal} icon={<Plus className="w-4 h-4" />}>
               Generate Token

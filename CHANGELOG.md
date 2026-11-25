@@ -48,7 +48,7 @@ Read these before updating from 1.3.x. The first start backs up the database wit
 ### Changed
 - **Smaller, faster log storage**: Logs take a little over half the disk space they did, and searches and counts over many days are much faster. Retention deletes a day's file, so the space comes back at once without Compact Database. The database size shown everywhere includes the day files.
 - **Keeps up during a log flood**: Pages, searches and the API stay responsive, and a Console that skips live updates says so (every log is still stored).
-- **Settings cards say how they save**: Each card says whether it waits for Save Changes. The MCP switch now waits for it too, instead of saving when clicked.
+- **The MCP switch waits for Save Changes**: On Settings > API & MCP Access, the MCP switch now waits for Save Changes like the other switches, instead of saving when clicked.
 - **Log drawer actions open on top of it**, so the drawer stays on the same log.
 - **One look for each control**: Buttons, fields, checkboxes and cards look the same on every screen, and hover highlights appear only with a mouse.
 - **MCP**: Clients on the 2026-07-28 protocol revision can connect. A tool failing inside LogShed returns only its name; the details go to LogShed's log.

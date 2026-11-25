@@ -7,7 +7,6 @@ import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { Button } from '../common/Button.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
 import { CHECKBOX_CLASS, Field, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
-import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { FeedbackBanner, type Feedback } from './FeedbackBanner.tsx';
 
 export interface DailyDigestCardProps {
@@ -101,7 +100,6 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
         icon={<Calendar />}
         title="Daily Digest"
         description="Automated 24-hour analytical summary covering log volume, top error sources, top logging services, and database storage delta."
-        note={<SaveModeNote mode="bar" />}
         actions={
           <Button
             size="sm"

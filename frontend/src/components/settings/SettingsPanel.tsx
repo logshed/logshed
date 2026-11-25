@@ -11,7 +11,6 @@ import {
 import { Key } from '../common/icons.ts';
 import { Tabs } from '../common/Tabs.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
-import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { Checkbox, Field, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 import { VersionInfo, SettingsSubTab } from '../../types.ts';
 import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
@@ -479,7 +478,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             icon={<FileText />}
             title="Internal Application Logging"
             description="Configure minimum severity level for LogShed operational diagnostics captured into its database and stream."
-            note={<SaveModeNote mode="bar" />}
             actions={
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-canvas border border-line-subtle text-[11px] font-mono text-fg-muted">
                 <span>Source: <code className="text-accent-400">logshed</code></span>
@@ -532,7 +530,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             icon={<ArrowUpCircle />}
             title="Version Updates"
             description="Periodically check GitHub Container Registry for new stable releases and display notification badges"
-            note={<SaveModeNote mode="bar" />}
           />
 
           <div className="pt-1">

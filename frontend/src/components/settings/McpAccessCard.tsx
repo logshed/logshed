@@ -4,7 +4,6 @@ import { Key } from '../common/icons.ts';
 import { Badge } from '../common/Badge.tsx';
 import { Button } from '../common/Button.tsx';
 import { Card, CardHeader } from '../common/Card.tsx';
-import { SaveModeNote } from '../common/SaveModeNote.tsx';
 import { CHECKBOX_CLASS, LABEL_TEXT_CLASS, TextField } from '../common/Field.tsx';
 import { updateSettings } from '../../api/settings.ts';
 import { SystemSettings } from '../../types.ts';
@@ -155,7 +154,6 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({
             </>
           }
           description="Expose LogShed tools and telemetry to AI assistants such as Claude Desktop, Cursor, and Windsurf via standard MCP protocol."
-          note={<SaveModeNote mode="bar" />}
           actions={
             <div className="flex items-center gap-3">
               <label htmlFor="enable-mcp" className="text-xs text-fg-soft font-medium cursor-pointer">
