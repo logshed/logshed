@@ -760,6 +760,8 @@ class AlertEvaluator:
 
             redacted_text, timeline = await self._redacted_prompt_logs(triggering_logs)
             prompt = build_alert_prompt(rule, facts, redacted_text, timeline)
+            # The AI System Instructions from Settings, as on-demand analysis uses; None means the default
+            system_prompt = (ai_settings.get("ai_system_prompt") or "").strip() or None
             fallback_models = provider_settings["fallback_models"]
             logger.info(
                 f"Starting AI incident analysis for rule '{rule.name}' with primary model "
@@ -776,6 +778,7 @@ class AlertEvaluator:
                 redacted_logs=redacted_text,
                 log_count=facts.log_count,
                 prompt_override=prompt,
+                system_prompt=system_prompt,
                 fallback_models=fallback_models,
                 timeout=provider_settings["ai_timeout"],
                 thinking_level=provider_settings["ai_thinking_level"],
@@ -791,7 +794,7 @@ class AlertEvaluator:
             ai.summary = ai_result.summary
             ai.incident_summary = ai_incident_summary(ai_result)
             ai.success = True
-            ai.audit_id = await self._save_alert_audit(rule, triggering_logs, facts, ai, ai_result, prompt, ai_settings)
+            ai.audit_id = await self._save_alert_audit(rule, triggering_logs, facts, ai, ai_result, prompt, system_prompt)
 
         except Exception as ai_err:
             logger.warning(
@@ -841,7 +844,7 @@ class AlertEvaluator:
         ai: AiEnrichment,
         ai_result: Any,
         prompt: str,
-        ai_settings: dict[str, str],
+        system_prompt: Optional[str],
     ) -> Optional[int]:
         """Record the diagnosis in the AI audit log; None when that fails (the alert still goes out)."""
         from app.services.ai_service import save_diagnosis_audit
@@ -860,7 +863,7 @@ class AlertEvaluator:
                 tokens_out=ai_result.tokens_out or 0,
                 tokens_thoughts=ai_result.tokens_thoughts or 0,
                 tokens_used=ai_result.tokens_used or 0,
-                system_prompt=ai_settings.get("ai_system_prompt") or None,
+                system_prompt=system_prompt,
                 trigger_source="alert",
                 custom_db_path=self.db_path,
             )

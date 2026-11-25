@@ -63,6 +63,7 @@ Read these before updating from 1.3.x. The first start backs up the database wit
 - **Compact no longer fills the container's disk**: Its temporary copy goes to `/data/.tmp` instead of `docker.img` on Unraid, and it refuses when there is not enough space.
 - **AI analysis with older Claude models** works again with Thinking off, and unknown AI providers are refused when saved through the API.
 - **AI prompts give dates and local times**: The log lines an alert rule sends to the AI give each date and time in UTC and in the server's time zone (`TZ`), as Analyze with AI does, instead of the UTC time alone that the instructions said would come with a local one, and the lines of both now always carry the date. `TZ` defaults to `UTC`: set it to your own zone to get local times.
+- **AI alert analyses use your AI System Instructions**: An alert rule sent the built-in instructions even when Settings held your own, while its Incident History showed yours as sent. It now sends the ones saved in Settings.
 - **The MCP prompt `safe_service_upgrade` keeps the upgrade's errors**: It started maintenance with `drop_errors`, so errors from a failed upgrade were never stored and its check for them always passed. It now silences alerts only, looks for errors from the service since maintenance started, and reports them instead of calling the upgrade healthy.
 - **A rare crash** when LogShed stopped, or paused for a Compact, while writing logs.
 - **No log storm in a UDP flood**: Dropped datagrams log one line every 10 seconds, not one each.

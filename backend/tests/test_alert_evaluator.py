@@ -2315,6 +2315,46 @@ class TestAlertEnrichmentAiSettings:
         assert f"[{log_time:%Y-%m-%d %H:%M:%S} UTC ({log_time:%Y-%m-%d %H:%M:%S} UTC)] [nas] [svc] boom" in prompt
         assert "- Timeline Reference: UTC (+00:00) with Homelab Local Time: UTC (UTC+00:00)" in prompt
 
+    @pytest.mark.asyncio
+    async def test_alert_uses_and_records_the_saved_system_instructions(self, tmp_path: Path, monkeypatch):
+        """The AI System Instructions from Settings reach the AI for an alert, and the audit record names what was sent."""
+        db_file = tmp_path / "alerts_sys.db"
+        custom = "You are a terse homelab assistant. Answer in three bullet points."
+        captured = await self._fire_enriched_alert(
+            db_file, monkeypatch, {"ai_system_prompt": custom}, datetime.now(timezone.utc)
+        )
+
+        assert captured["system_prompt"] == custom
+        conn = get_connection(db_file)
+        recorded = conn.execute("SELECT system_prompt FROM ai_audit_log").fetchall()
+        conn.close()
+        assert [r[0] for r in recorded] == [custom]
+
+    @pytest.mark.asyncio
+    async def test_alert_without_saved_system_instructions_uses_the_default(self, tmp_path: Path, monkeypatch):
+        """With no AI System Instructions saved, an alert leaves the system prompt to the engine's default."""
+        db_file = tmp_path / "alerts_sys_default.db"
+        captured = await self._fire_enriched_alert(db_file, monkeypatch, {}, datetime.now(timezone.utc))
+
+        assert captured["system_prompt"] is None
+        conn = get_connection(db_file)
+        recorded = conn.execute("SELECT system_prompt FROM ai_audit_log").fetchall()
+        conn.close()
+        assert [r[0] for r in recorded] == [None]
+
+    @pytest.mark.asyncio
+    async def test_alert_with_blank_saved_system_instructions_uses_the_default(self, tmp_path: Path, monkeypatch):
+        """Saved instructions of only spaces and line breaks count as none: the default is sent and recorded as such."""
+        db_file = tmp_path / "alerts_sys_blank.db"
+        captured = await self._fire_enriched_alert(db_file, monkeypatch, {"ai_system_prompt": " \n "}, datetime.now(timezone.utc))
+
+        assert captured["system_prompt"] is None
+        conn = get_connection(db_file)
+        recorded = conn.execute("SELECT system_prompt FROM ai_audit_log").fetchall()
+        conn.close()
+        assert [r[0] for r in recorded] == [None]
+
+
 class TestInvalidAlertPatternIsNotRevalidated:
     """A rule whose regex fails validation is marked invalid once, not re-checked per log line."""
 
