@@ -822,7 +822,7 @@ def format_prompt_log_line(
     Format a single log record for inclusion in AI analysis prompt streams.
     Combines chronological timestamp, resolved source host/alias, application name,
     explicit severity code, and diagnostic structured data payload.
-    When tz or tz_offset_minutes is provided, formats dual timestamps with both UTC and local homelab time.
+    When tz or tz_offset_minutes is provided, formats dual timestamps with both UTC and local homelab time, each with its date.
     A tz (such as a ZoneInfo) gives each line the offset in force at its own moment, so lines on
     either side of a daylight saving change are both correct; tz_offset_minutes is one fixed offset.
     """
@@ -846,12 +846,8 @@ def format_prompt_log_line(
             else:
                 dt_local = dt_utc + datetime.timedelta(minutes=tz_offset_minutes)
             tz_label = tz_name or "local"
-            utc_time = dt_utc.strftime("%H:%M:%S")
-            local_time = dt_local.strftime("%H:%M:%S")
-            if dt_utc.date() != dt_local.date():
-                ts_display = f"{dt_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC ({dt_local.strftime('%Y-%m-%d %H:%M:%S')} {tz_label})"
-            else:
-                ts_display = f"{utc_time} UTC ({local_time} {tz_label})"
+            # The date too, so the model can tell which day a log is from and set it against dates in messages
+            ts_display = f"{dt_utc:%Y-%m-%d %H:%M:%S} UTC ({dt_local:%Y-%m-%d %H:%M:%S} {tz_label})"
         except Exception:
             ts_display = ts_str
 
@@ -872,6 +868,31 @@ def format_prompt_log_line(
         payload = msg_str
 
     return f"[{ts_display}] [{source_str}] [{app_str}] {sev_part}{payload}"
+
+
+def timeline_reference_line(
+    tz_name: Optional[str],
+    tz_offset_minutes: Optional[int | Sequence[int]],
+) -> Optional[str]:
+    """
+    The prompt's Timeline Reference line: UTC beside the local zone and the UTC offsets in force
+    across the logs, in time order (two when a daylight saving change falls inside them).
+    None when there is neither a zone name nor an offset.
+    """
+    if isinstance(tz_offset_minutes, int):
+        offsets = [tz_offset_minutes]
+    else:
+        offsets = list(tz_offset_minutes or [])
+
+    if not (tz_name or offsets):
+        return None
+    tz_label = tz_name or "local"
+    if len(offsets) == 1:
+        tz_label += f" ({format_utc_offset(offsets[0])})"
+    elif offsets:
+        joined = ", then ".join(format_utc_offset(o) for o in offsets)
+        tz_label += f" ({joined}, the clocks changed during these logs)"
+    return f"- Timeline Reference: UTC (+00:00) with Homelab Local Time: {tz_label}"
 
 
 def build_analysis_prompt(
@@ -897,19 +918,9 @@ def build_analysis_prompt(
         f"- Total Selected Logs: {log_count}",
     ]
 
-    if isinstance(tz_offset_minutes, int):
-        offsets = [tz_offset_minutes]
-    else:
-        offsets = list(tz_offset_minutes or [])
-
-    if tz_name or offsets:
-        tz_label = tz_name or "local"
-        if len(offsets) == 1:
-            tz_label += f" ({format_utc_offset(offsets[0])})"
-        elif offsets:
-            joined = ", then ".join(format_utc_offset(o) for o in offsets)
-            tz_label += f" ({joined}, the clocks changed during these logs)"
-        parts.append(f"- Timeline Reference: UTC (+00:00) with Homelab Local Time: {tz_label}")
+    timeline = timeline_reference_line(tz_name, tz_offset_minutes)
+    if timeline:
+        parts.append(timeline)
 
     if host_notes and host_notes.strip():
         stripped_notes = str(redact(host_notes.strip()))

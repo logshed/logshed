@@ -2471,9 +2471,9 @@ class TestPromptFormattingAndStructuredData:
             tz_name="BST",
             tz_offset_minutes=60,
         )
-        assert line == "[01:05:00 UTC (02:05:00 BST)] [plex] [plex] [INFO] Beginning scan"
+        assert line == "[2026-10-08 01:05:00 UTC (2026-10-08 02:05:00 BST)] [plex] [plex] [INFO] Beginning scan"
 
-        # Across midnight transition, date is included
+        # Across midnight the two dates differ
         line_midnight = ai_engine.format_prompt_log_line(
             timestamp="2026-10-07T23:30:00+00:00",
             source="plex",
@@ -2525,8 +2525,8 @@ class TestPromptFormattingAndStructuredData:
             timestamp="2026-10-25T01:30:00+00:00", source="nas", app_name="cron", message="second",
             tz_name="Europe/London", tz=london,
         )
-        assert before == "[00:30:00 UTC (01:30:00 Europe/London)] [nas] [cron] first"
-        assert after == "[01:30:00 UTC (01:30:00 Europe/London)] [nas] [cron] second"
+        assert before == "[2026-10-25 00:30:00 UTC (2026-10-25 01:30:00 Europe/London)] [nas] [cron] first"
+        assert after == "[2026-10-25 01:30:00 UTC (2026-10-25 01:30:00 Europe/London)] [nas] [cron] second"
 
     def test_build_analysis_prompt_timeline_reference_offsets(self):
         single = ai_engine.build_analysis_prompt(
@@ -2551,22 +2551,22 @@ class TestPromptFormattingAndStructuredData:
         )
 
     def test_resolve_prompt_zone_prefers_zone_name_over_offset(self):
-        from app.services.ai_service import _resolve_prompt_zone
+        from app.services.ai_service import resolve_prompt_zone
 
         # A stale offset (BST, from a tab opened before the change) must not override the zone rules
-        zone, label = _resolve_prompt_zone("Europe/London", 60)
+        zone, label = resolve_prompt_zone("Europe/London", 60)
         assert label == "Europe/London"
         assert getattr(zone, "key", None) == "Europe/London"
 
-        zone, label = _resolve_prompt_zone(":Europe/London", None)
+        zone, label = resolve_prompt_zone(":Europe/London", None)
         assert label == "Europe/London"
 
         # No usable zone name: the offset is used as given
-        zone, label = _resolve_prompt_zone("BST", 60)
+        zone, label = resolve_prompt_zone("BST", 60)
         assert label == "BST"
         assert zone.utcoffset(None) == datetime.timedelta(minutes=60)
 
-        zone, label = _resolve_prompt_zone(None, -300)
+        zone, label = resolve_prompt_zone(None, -300)
         assert label == "UTC-05:00"
 
     @pytest.mark.asyncio
@@ -2594,8 +2594,8 @@ class TestPromptFormattingAndStructuredData:
         assert res.status_code == 200
         prompt_text = res.json()["redacted_prompt"]
 
-        assert "[14:00:00 UTC (15:00:00 Europe/London)] [nas] [backup] [INFO] Saturday backup" in prompt_text
-        assert "[14:00:00 UTC (14:00:00 Europe/London)] [nas] [backup] [INFO] Monday backup" in prompt_text
+        assert "[2026-10-24 14:00:00 UTC (2026-10-24 15:00:00 Europe/London)] [nas] [backup] [INFO] Saturday backup" in prompt_text
+        assert "[2026-10-26 14:00:00 UTC (2026-10-26 14:00:00 Europe/London)] [nas] [backup] [INFO] Monday backup" in prompt_text
         assert "Europe/London (UTC+01:00, then UTC+00:00, the clocks changed during these logs)" in prompt_text
 
 

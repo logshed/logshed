@@ -758,8 +758,8 @@ class AlertEvaluator:
 
             from app.services.ai_engine import execute_ai_analysis
 
-            redacted_text = await self._redacted_prompt_logs(triggering_logs)
-            prompt = build_alert_prompt(rule, facts, redacted_text)
+            redacted_text, timeline = await self._redacted_prompt_logs(triggering_logs)
+            prompt = build_alert_prompt(rule, facts, redacted_text, timeline)
             fallback_models = provider_settings["fallback_models"]
             logger.info(
                 f"Starting AI incident analysis for rule '{rule.name}' with primary model "
@@ -803,10 +803,18 @@ class AlertEvaluator:
         return ai
 
     @staticmethod
-    async def _redacted_prompt_logs(triggering_logs: list[dict[str, Any]]) -> str:
-        """The newest whole entries as prompt lines, redacted, so no line can close the prompt's code fence."""
-        from app.services.ai_engine import escape_code_fences, format_prompt_log_line
+    async def _redacted_prompt_logs(triggering_logs: list[dict[str, Any]]) -> tuple[str, Optional[str]]:
+        """
+        The newest whole entries as prompt lines, redacted, so no line can close the prompt's code
+        fence, and the prompt's Timeline Reference line. Each line cites UTC and the server's local
+        time: an alert has no browser to name a zone, so the server zone (TZ) is used, as on-demand
+        analysis does when the browser sends none.
+        """
+        from app.services.ai_engine import escape_code_fences, format_prompt_log_line, timeline_reference_line
+        from app.services.ai_service import offsets_in_force, resolve_prompt_zone
 
+        entries = triggering_logs[-FULL_ENTRIES_KEPT:]  # Only the newest are whole entries
+        zone, zone_name = resolve_prompt_zone(None, None)
         raw_lines = [
             format_prompt_log_line(
                 timestamp=entry.get("timestamp"),
@@ -815,12 +823,15 @@ class AlertEvaluator:
                 message=entry.get("message", ""),
                 severity=entry.get("severity"),
                 raw=entry.get("raw"),
+                tz_name=zone_name,
+                tz=zone,
             )
-            for entry in triggering_logs[-FULL_ENTRIES_KEPT:]  # Only the newest are whole entries
+            for entry in entries
         ]
         redacted_lines = await asyncio.to_thread(redact, raw_lines)
         redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
-        return escape_code_fences(redacted_text)
+        timeline = timeline_reference_line(zone_name, offsets_in_force(entries, zone))
+        return escape_code_fences(redacted_text), timeline
 
     async def _save_alert_audit(
         self,

@@ -210,8 +210,10 @@ def plain_incident_summary(rule: "CompiledAlertRule", facts: AlertFacts) -> str:
     return f"Alert triggered with {facts.log_count} matching event(s)."
 
 
-def build_alert_prompt(rule: "CompiledAlertRule", facts: AlertFacts, redacted_text: str) -> str:
-    """The AI prompt for an alert, around its already redacted and fenced log lines."""
+def build_alert_prompt(
+    rule: "CompiledAlertRule", facts: AlertFacts, redacted_text: str, timeline: Optional[str] = None
+) -> str:
+    """The AI prompt for an alert, around its already redacted and fenced log lines and the Timeline Reference line."""
     if rule.rule_type == "rate":
         threshold_line = (
             f"- Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s "
@@ -221,6 +223,7 @@ def build_alert_prompt(rule: "CompiledAlertRule", facts: AlertFacts, redacted_te
     else:
         threshold_line = f"- Threshold: {rule.threshold_count} matches in {rule.window_seconds}s"
         culprit_section = ""
+    timeline_line = f"{timeline}\n" if timeline else ""
 
     return (
         f"### Security / Operations Incident Alert\n"
@@ -229,7 +232,8 @@ def build_alert_prompt(rule: "CompiledAlertRule", facts: AlertFacts, redacted_te
         f"- Host / Source: {facts.host or 'Unknown'}\n"
         f"- App / Container: {facts.app or 'Unknown'}\n"
         f"{threshold_line}\n"
-        f"- Offending IP: {facts.ip or 'None detected'}\n\n"
+        f"- Offending IP: {facts.ip or 'None detected'}\n"
+        f"{timeline_line}\n"
         f"{culprit_section}"
         f"### Redacted Log Stream (Chronological)\n"
         f"```\n{redacted_text}\n```\n\n"

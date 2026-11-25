@@ -2242,6 +2242,78 @@ class TestAlertEnrichmentAiSettings:
         assert captured["base_url"] == "https://openrouter.ai/api/v1"
         assert captured["model_params"] == {"openai/gpt-6-luna": params}
 
+    @staticmethod
+    async def _fire_enriched_alert(db_file: Path, monkeypatch, settings: dict[str, str], log_time: datetime) -> dict:
+        """Fire one AI-enriched pattern alert with these saved settings; the arguments sent to the AI."""
+        run_migrations(db_file)
+        _turn_ai_on(db_file)
+        conn = get_connection(db_file)
+        conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, match_pattern, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES ('Zone Probe', 'pattern', 'boom', 1, 60, 300, 1, 1, ?)
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        for key, value in settings.items():
+            conn.execute(
+                "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, datetime('now'), 0)", (key, value)
+            )
+        conn.commit()
+        conn.close()
+
+        captured: dict = {}
+
+        async def mock_execute_ai_analysis(**kwargs):
+            captured.update(kwargs)
+            return AiAnalysisResult(
+                summary="summary", root_cause="", remediation="", raw_response="raw", prompt_sent=None,
+                tokens_in=1, tokens_out=1, tokens_thoughts=0, tokens_used=2, model_used="mock-model",
+            )
+
+        import app.services.ai_engine as ai_engine
+        monkeypatch.setattr(ai_engine, "execute_ai_analysis", mock_execute_ai_analysis)
+
+        async def mock_send(self, title, body, channel_id=None):
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(db_file)
+        await evaluator.evaluate_batch(
+            [{"id": 1, "app_name": "svc", "source_alias": "nas", "message": "boom", "timestamp": log_time.isoformat()}]
+        )
+        await evaluator.stop()
+        return captured
+
+    @pytest.mark.asyncio
+    async def test_alert_prompt_cites_utc_and_server_local_time(self, tmp_path: Path, monkeypatch):
+        """Each log line in an alert prompt gives UTC and the server's local time, as the system prompt says and Analyze does."""
+        from zoneinfo import ZoneInfo
+
+        monkeypatch.setenv("TZ", "Asia/Kolkata")  # UTC+05:30 all year, so local never equals UTC
+        log_time = datetime.now(timezone.utc).replace(microsecond=0)
+        captured = await self._fire_enriched_alert(tmp_path / "alerts_tz.db", monkeypatch, {}, log_time)
+
+        prompt = captured["prompt_override"]
+        local = log_time.astimezone(ZoneInfo("Asia/Kolkata"))
+        stamp = f"[{log_time:%Y-%m-%d %H:%M:%S} UTC ({local:%Y-%m-%d %H:%M:%S} Asia/Kolkata)]"
+        assert f"{stamp} [nas] [svc] boom" in prompt
+        assert log_time.isoformat() not in prompt
+        assert "- Timeline Reference: UTC (+00:00) with Homelab Local Time: Asia/Kolkata (UTC+05:30)" in prompt
+
+    @pytest.mark.asyncio
+    async def test_alert_prompt_on_a_utc_server_names_utc_as_local_time(self, tmp_path: Path, monkeypatch):
+        """With TZ=UTC, as the templates ship, both times are UTC and the Timeline Reference line says so."""
+        monkeypatch.setenv("TZ", "UTC")
+        log_time = datetime.now(timezone.utc).replace(microsecond=0)
+        captured = await self._fire_enriched_alert(tmp_path / "alerts_utc.db", monkeypatch, {}, log_time)
+
+        prompt = captured["prompt_override"]
+        assert f"[{log_time:%Y-%m-%d %H:%M:%S} UTC ({log_time:%Y-%m-%d %H:%M:%S} UTC)] [nas] [svc] boom" in prompt
+        assert "- Timeline Reference: UTC (+00:00) with Homelab Local Time: UTC (UTC+00:00)" in prompt
 
 class TestInvalidAlertPatternIsNotRevalidated:
     """A rule whose regex fails validation is marked invalid once, not re-checked per log line."""
@@ -3083,6 +3155,7 @@ class TestThresholdWindowKeepsWholeEntriesOnlyForTheNewest:
     async def test_firing_sends_the_same_sample_and_ai_lines(self, test_db: Path, monkeypatch):
         from app.core.redactor import redact
         from app.services.ai_engine import format_prompt_log_line
+        from app.services.ai_service import resolve_prompt_zone
         from app.services.notifier import NotifierService
         import app.services.ai_engine as ai_engine
 
@@ -3111,10 +3184,11 @@ class TestThresholdWindowKeepsWholeEntriesOnlyForTheNewest:
         await evaluator.evaluate_batch(entries[60:])
         await evaluator.stop()
 
+        zone, zone_name = resolve_prompt_zone(None, None)
         expected_lines = redact([
             format_prompt_log_line(
                 timestamp=e["timestamp"], source=e["source_alias"], app_name=e["app_name"],
-                message=e["message"], severity=e["severity"], raw=e["raw"],
+                message=e["message"], severity=e["severity"], raw=e["raw"], tz_name=zone_name, tz=zone,
             )
             for e in entries[-50:]
         ])

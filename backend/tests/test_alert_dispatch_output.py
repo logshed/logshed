@@ -54,6 +54,8 @@ def _db(tmp_path: Path, ai_on: bool) -> Path:
 async def _run(tmp_path, monkeypatch, rule_type: str, ai: str) -> dict:
     db = _db(tmp_path, ai_on=ai != "off")
     monkeypatch.setenv("APP_URL", "https://logshed.lan/")
+    # The prompt cites each log's local time in the server zone: pin one that differs from UTC
+    monkeypatch.setenv("TZ", "America/New_York")
     from app.core.config import invalidate_settings_cache
     invalidate_settings_cache()
     prompts: list[str] = []

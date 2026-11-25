@@ -16,7 +16,7 @@
    }
   ],
   "prompt": [
-   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: rate\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 logs/s in 60s (Measured: 0.1 logs/s)\n- Offending IP: 198.51.100.4\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: rate\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 logs/s in 60s (Measured: 0.1 logs/s)\n- Offending IP: 198.51.100.4\n- Timeline Reference: UTC (+00:00) with Homelab Local Time: America/New_York (UTC-05:00)\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12 10:00:00 UTC (2026-11-12 05:00:00 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12 10:00:01 UTC (2026-11-12 05:00:01 America/New_York)] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12 10:00:02 UTC (2026-11-12 05:00:02 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
   ]
  },
  "rate/none": {
@@ -72,7 +72,7 @@
    }
   ],
   "prompt": [
-   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: rate\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 logs/s in 60s (Measured: 0.1 logs/s)\n- Offending IP: 198.51.100.4\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: rate\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 logs/s in 60s (Measured: 0.1 logs/s)\n- Offending IP: 198.51.100.4\n- Timeline Reference: UTC (+00:00) with Homelab Local Time: America/New_York (UTC-05:00)\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12 10:00:00 UTC (2026-11-12 05:00:00 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12 10:00:01 UTC (2026-11-12 05:00:01 America/New_York)] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12 10:00:02 UTC (2026-11-12 05:00:02 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
   ]
  },
  "threshold/fail": {
@@ -92,7 +92,7 @@
    }
   ],
   "prompt": [
-   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: threshold\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 matches in 60s\n- Offending IP: 198.51.100.4\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: threshold\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 matches in 60s\n- Offending IP: 198.51.100.4\n- Timeline Reference: UTC (+00:00) with Homelab Local Time: America/New_York (UTC-05:00)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12 10:00:00 UTC (2026-11-12 05:00:00 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12 10:00:01 UTC (2026-11-12 05:00:01 America/New_York)] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12 10:00:02 UTC (2026-11-12 05:00:02 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
   ]
  },
  "threshold/none": {
@@ -148,7 +148,7 @@
    }
   ],
   "prompt": [
-   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: threshold\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 matches in 60s\n- Offending IP: 198.51.100.4\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: threshold\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 matches in 60s\n- Offending IP: 198.51.100.4\n- Timeline Reference: UTC (+00:00) with Homelab Local Time: America/New_York (UTC-05:00)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12 10:00:00 UTC (2026-11-12 05:00:00 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12 10:00:01 UTC (2026-11-12 05:00:01 America/New_York)] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12 10:00:02 UTC (2026-11-12 05:00:02 America/New_York)] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
   ]
  }
 }

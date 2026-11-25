@@ -205,7 +205,7 @@ def resolve_ai_provider_settings(
     }
 
 
-def _resolve_prompt_zone(
+def resolve_prompt_zone(
     client_timezone: Optional[str],
     client_utc_offset_minutes: Optional[int],
 ) -> tuple[datetime.tzinfo, str]:
@@ -228,7 +228,7 @@ def _resolve_prompt_zone(
     return server_tz, label
 
 
-def _offsets_in_force(rows: list[Any], tz: datetime.tzinfo) -> list[int]:
+def offsets_in_force(rows: list[Any], tz: datetime.tzinfo) -> list[int]:
     """The distinct UTC offsets (in minutes) of `tz` across the rows' timestamps, in time order."""
     offsets: list[int] = []
     for r in rows:
@@ -283,8 +283,8 @@ async def build_diagnosis_context(
 
     rows, settings, host_notes = result
 
-    prompt_tz, eff_tz_name = _resolve_prompt_zone(client_timezone, client_utc_offset_minutes)
-    tz_offsets = _offsets_in_force(rows, prompt_tz)
+    prompt_tz, eff_tz_name = resolve_prompt_zone(client_timezone, client_utc_offset_minutes)
+    tz_offsets = offsets_in_force(rows, prompt_tz)
 
     unique_aliases = sorted(list({r["source_alias"] for r in rows if r["source_alias"]}))
     source_alias = ", ".join(unique_aliases) if unique_aliases else (rows[0]["source_ip"] or "unknown")

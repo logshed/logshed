@@ -127,6 +127,7 @@ Defines how long LogShed must suppress duplicate notifications after an alert fi
 #### 10. AI Root-Cause Incident Enrichment
 When enabled, LogShed automatically masks sensitive data (passwords, tokens, API keys, IPs) from triggering logs and requests root-cause diagnosis from your configured Large Language Model (Gemini, OpenAI, or local Ollama).
 - Appends diagnosis summary and root cause insights to the incident record.
+- Each log line sent to the model gives its time in UTC and in the server's time zone (`TZ`), so the diagnosis can name both.
 - In notification messages, a concise summary is included along with a link to review the full remediation steps in the LogShed UI.
 - If AI providers encounter transient timeouts, or a Claude model declines the request, LogShed automatically attempts configured fallback models before dispatching the alert.
 
