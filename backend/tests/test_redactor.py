@@ -279,6 +279,34 @@ class TestRedactorPasswordKeyBoundaries:
     def test_words_ending_in_pass_are_left_alone(self, text):
         assert redact(text) == text
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "ben : TTY=pts/3 ; PWD=/home/ben/workspace/site ; USER=root ; COMMAND=/usr/bin/ls",
+            "PWD=/root",
+            "PWD=~/src",
+            '{"PWD": "/var/lib/app", "HOME": "/root"}',
+            "pwd: /srv/data",
+        ],
+    )
+    def test_working_directory_is_left_alone(self, text):
+        # PWD is the shell's working directory (sudo and env dumps log it), not a password
+        assert redact(text) == text
+
+    @pytest.mark.parametrize(
+        "text, secret",
+        [
+            ("PWD=hunter2", "hunter2"),
+            ("MYSQL_PWD=/s3cret", "/s3cret"),
+            ("db-pwd: ~s3cret", "~s3cret"),
+            ("user.pwd=/s3cret", "/s3cret"),
+        ],
+    )
+    def test_pwd_keys_that_are_not_a_directory_stay_hidden(self, text, secret):
+        result = redact(text)
+        assert secret not in result
+        assert REDACTED in result
+
 
 class TestRedactorQuotedKeys:
     """Key/value patterns must also match JSON and Python style quoted keys."""

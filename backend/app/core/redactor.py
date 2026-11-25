@@ -138,10 +138,13 @@ _PATTERNS: list[tuple[str, re.Pattern, str]] = [
     # --- Password Fields ---
     # password=..., password: ..., passwd=..., "password": "...", etc. No letter or digit may come
     # right before the key, so db_password= and SMTP_PWD= match but words like "bypass" do not.
+    # A bare PWD whose value starts with / or ~ is the shell's working directory (sudo and env
+    # dumps log PWD=/home/...), so it is left alone; a prefixed key (MYSQL_PWD=) never is.
     (
         "password_field",
         re.compile(
-            r"((?<![a-z0-9])(?:password|passwd|pwd)" + _SEP + r")" + _SECRET_VALUE,
+            r"((?<![a-z0-9])(?:password|passwd|(?<=[_.-])pwd|pwd(?!" + _SEP + _Q + r"[/~]))"
+            + _SEP + r")" + _SECRET_VALUE,
             re.IGNORECASE,
         ),
         rf"\1{REDACTED}",
