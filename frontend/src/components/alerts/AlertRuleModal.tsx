@@ -377,6 +377,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             onChange={(e) => setFormName(e.target.value)}
             placeholder="e.g. Critical Auth Failure Spike"
             required
+            autoFocus
             className={controlClass()}
           />
         </div>

@@ -60,6 +60,21 @@ describe('AlertRuleModal Component', () => {
     expect(screen.queryByRole('heading', { name: 'Create New Alert Rule' })).toBeNull();
   });
 
+  it('opens with the cursor in Rule Name, as the drop rule dialog does', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={null}
+        channels={mockChannels}
+        availableApps={['postgres', 'nginx']}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    expect(document.activeElement).toBe(screen.getByLabelText('Rule Name'));
+  });
+
   it('renders create modal and submits new alert rule', async () => {
     const createdRule: AlertRule = {
       ...mockRule,
