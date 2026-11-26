@@ -375,7 +375,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           </Button>
           <div
             className="text-fg-subtle hover:text-fg-soft transition cursor-help p-0.5"
-            title="Pruning runs automatically once every 24 hours. SQLite automatically reuses free database pages for incoming logs without requiring an exclusive offline VACUUM. Lowering retention shows what would be deleted and lets you delete it now or at the next daily cleanup. Click 'Purge Expired Logs & History Now' to review and immediately purge older logs and history entries, compact the search index, and checkpoint the WAL. Click 'Compact Database' to repack the database file and return freelist space to the host filesystem."
+            title="Cleanup runs at start-up and a few minutes after each midnight UTC. Logs are kept in one file per UTC day, by the time LogShed received them, and a day's file is deleted whole once the whole day is older than the retention, so a log can stay up to a day longer (Log Files below lists each day and when it goes). Lowering retention shows what would be deleted and lets you delete it now or at the next cleanup. 'Purge Expired Logs & History Now' shows what is past the retention and deletes it now. 'Compact Database' repacks logs.db (settings, history, and logs kept from before an upgrade from 1.3.x) and gives its free space back to the disk."
           >
             <Info className="w-4 h-4" />
           </div>

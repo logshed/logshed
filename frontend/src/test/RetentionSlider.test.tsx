@@ -362,7 +362,7 @@ describe('RetentionSlider Component', () => {
   });
 
 
-  it('renders explanatory caption and Info icon with tooltip about automated schedule and page reuse', () => {
+  it('renders explanatory caption and Info icon with tooltip about the cleanup schedule and day files', () => {
     render(<RetentionSlider retentionDays={14} onSaveRetention={vi.fn()} />);
 
     // Explanatory footnote caption
@@ -372,10 +372,10 @@ describe('RetentionSlider Component', () => {
       )
     ).toBeInTheDocument();
 
-    // Info icon tooltip
-    expect(
-      screen.getByTitle(/SQLite automatically reuses free database pages/i)
-    ).toBeInTheDocument();
+    // Info icon tooltip: 1.4.0 keeps logs in day files by received time, not in reused pages of one file
+    const tooltip = screen.getByTitle(/one file per UTC day, by the time LogShed received them/i);
+    expect(tooltip.getAttribute('title')).toContain('a few minutes after each midnight UTC');
+    expect(tooltip.getAttribute('title')).not.toMatch(/reuses free database pages/i);
   });
 
   it('handles boundary condition maxRetentionDays=1 without NaN styles and formats singular 1 Day', () => {
