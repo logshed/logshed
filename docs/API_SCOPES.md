@@ -67,7 +67,7 @@ The token dialog offers these presets. Each is just a saved list of scopes.
 
 ## Custom Scopes
 
-When no preset fits, choose **Custom** in the token dialog. It opens a checklist of every scope, grouped by category, starting from the preset you had selected (or, when editing, from the token's current scopes):
+When no preset fits, choose **Custom** in the token dialog. It opens a checklist of every scope, grouped by category, starting from the preset you had selected (or, when editing, from the token's current scopes). After **Full Access** it starts from the default preset, **AI Assistant / MCP (Read Only)**, instead of every scope: Full Access sits just above Custom, so the arrow keys pass it on the way.
 
 - Ticking **Full Access** or a whole category saves the wildcard (`*` or `logs:*`), so the token also gets actions added later.
 - Ticking every action of a category one by one saves those actions only, and the category box shows as partly ticked.

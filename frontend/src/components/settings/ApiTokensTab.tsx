@@ -38,6 +38,7 @@ import { Modal } from '../common/Modal.tsx';
 import { TableHead } from '../common/Table.tsx';
 
 const DEFAULT_PRESET_ID = 'ai_mcp';
+const FULL_ACCESS_PRESET_ID = 'full';
 
 const EXPIRY_OPTIONS: SelectOption[] = [
   { value: '30', label: '30 days' },
@@ -137,10 +138,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
     setIsGenerateModalOpen(true);
   };
 
-  // Custom starts as a copy of the preset that was selected
+  // Custom starts as a copy of the preset that was selected, except Full Access: it sits just above
+  // Custom, so the arrow keys always pass it on the way, and a copy would tick every scope. Custom
+  // then starts from the default preset instead (Full Access stays one click away).
   const handleGeneratePresetSelect = (id: string) => {
     if (id === CUSTOM_PRESET_ID && selectedPresetId !== CUSTOM_PRESET_ID) {
-      setNewTokenSelection(expandScopes(chosenScopes(selectedPresetId, newTokenSelection)));
+      const base = selectedPresetId === FULL_ACCESS_PRESET_ID ? DEFAULT_PRESET_ID : selectedPresetId;
+      setNewTokenSelection(expandScopes(chosenScopes(base, newTokenSelection)));
     }
     setSelectedPresetId(id);
   };

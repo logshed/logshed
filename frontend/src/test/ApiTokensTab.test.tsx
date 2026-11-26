@@ -616,6 +616,21 @@ describe('ApiTokensTab Component', () => {
       );
     });
 
+    it('never starts Custom as a copy of Full Access, which the arrow keys pass on the way to Custom', async () => {
+      vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+      render(<ApiTokensTab />);
+      await waitFor(() => {
+        expect(screen.getByText('No API tokens generated yet')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Generate Token/i }));
+      fireEvent.click(screen.getByRole('radio', { name: /^Full Access/ }));
+      fireEvent.click(screen.getByRole('radio', { name: /^Custom/ }));
+
+      // It starts from the dialog's default preset instead (AI Assistant / MCP, read only)
+      expect(screen.getByRole('checkbox', { name: /Full Access/ })).not.toBeChecked();
+      expect(screen.getByTestId('create-token-saved-scopes')).toHaveTextContent('logs:read, alerts:read, system:read');
+    });
+
     it('disables submit while nothing is ticked', async () => {
       await openEmptyCustomPicker();
       expect(screen.getByRole('button', { name: /Create Token/i })).toBeDisabled();
