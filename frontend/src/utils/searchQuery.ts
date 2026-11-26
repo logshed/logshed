@@ -94,10 +94,34 @@ function parseSearchTokens(tokens: string[]): SearchNode {
   return parseOr();
 }
 
+/**
+ * The query's tokens, with AND between a bracketed group and a term or another group a space
+ * apart, as format_fts_query adds it (FTS5 rejects "(a OR b) c" without it; plain words side by
+ * side stay). A bracket glued to a word, as in pasted log text such as error(5), gets no AND.
+ */
+function tokensWithGroupAnds(lowered: string): string[] {
+  const out: string[] = [];
+  let lastEnd = 0;
+  for (const match of lowered.matchAll(SEARCH_TOKEN_RE)) {
+    const token = match[0];
+    const start = match.index ?? 0;
+    const spaced = start > lastEnd;
+    lastEnd = start + token.length;
+    const prev = out[out.length - 1];
+    if (prev !== undefined && spaced) {
+      const endsOperand = prev === ')' || (!isSearchOperator(prev) && prev !== '(');
+      const startsOperand = token === '(' || (!isSearchOperator(token) && token !== ')');
+      if (endsOperand && startsOperand && (prev === ')' || token === '(')) out.push('and');
+    }
+    out.push(token);
+  }
+  return out;
+}
+
 /** Splits a search query once, so each incoming live log is matched without re-parsing it. */
 export function compileSearchQuery(query?: string): CompiledSearchQuery {
   const lowered = (query || '').trim().toLowerCase();
-  const tokens = lowered.match(SEARCH_TOKEN_RE) || [];
+  const tokens = tokensWithGroupAnds(lowered);
   const terms = tokens.filter((t) => t !== '(' && t !== ')' && !isSearchOperator(t));
   const hasOperators = tokens.some(isSearchOperator);
   const expr = lowered && isValidSearchExpression(lowered, tokens) ? parseSearchTokens(tokens) : null;

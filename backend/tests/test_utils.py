@@ -518,6 +518,38 @@ class TestFormatFtsQueryPrefixAliases:
         assert format_fts_query("app:ngi*") == "app_name:ngi*"
         assert format_fts_query("app:nginx AND msg:refused") == "app_name:nginx* AND message:refused*"
 
+    def test_group_beside_a_term_gets_an_explicit_and(self):
+        from app.core.utils import format_fts_query
+
+        # FTS5 rejects a group next to a term without AND; plain words side by side stay as they are
+        assert format_fts_query("(error OR timeout) host:pve-node2") == '( error* OR timeout* ) AND source_alias:"pve-node2"*'
+        assert format_fts_query("app:sshd (failed OR invalid)") == "app_name:sshd* AND ( failed* OR invalid* )"
+        assert format_fts_query("(a OR b) (c OR d)") == "( a OR b ) AND ( c OR d )"
+        assert format_fts_query("(error OR timeout) AND host:x") == "( error* OR timeout* ) AND source_alias:x"
+        assert format_fts_query("error NOT (cron OR backup)") == "error* NOT ( cron* OR backup* )"
+        assert format_fts_query("disk full") == "disk* full*"
+        # A term FTS5 cannot take bare is quoted, so the AND query still runs (review, 2026-11-26)
+        assert format_fts_query("(failed OR invalid) user=root") == '( failed* OR invalid* ) AND "user=root"*'
+        assert format_fts_query("/var/log (error)") == '"/var/log"* AND ( error* )'
+
+    def test_text_glued_to_a_bracket_stays_a_phrase(self):
+        from app.core.utils import format_fts_query
+
+        # Pasted log text such as error(5) or pam_unix(sshd:session) is not a group: it falls back
+        # to quoted words as before, so error(5) still finds error(50)
+        assert format_fts_query("error(5)") == '"error(5)"*'
+        assert format_fts_query("pam_unix(sshd:session)") == '"pam_unix(sshd:session)"*'
+
+    def test_terms_fts5_cannot_take_bare_are_quoted(self):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query("user=root") == '"user=root"*'
+        assert format_fts_query("user@host") == '"user@host"*'
+        assert format_fts_query("app:my=app") == 'app_name:"my=app"*'
+        # FTS5's own ^ (start of a column) and + stay as typed, as does any letter outside ASCII
+        assert format_fts_query("^started") == "^started*"
+        assert format_fts_query("café") == "café*"
+
     def test_incomplete_alias_falls_back_to_escaped_tokens(self):
         from app.core.utils import format_fts_query
 

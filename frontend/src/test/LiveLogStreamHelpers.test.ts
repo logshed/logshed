@@ -127,6 +127,10 @@ describe('matchesSearchQuery AND, OR and NOT like history search', () => {
     ['alpha NOT bravo OR charlie', ['alpha', 'alpha charlie', 'charlie', 'bravo charlie', 'alpha bravo charlie']],
     ['alpha OR bravo NOT charlie', ['alpha', 'alpha charlie', 'alpha bravo', 'alpha bravo charlie', 'bravo']],
     ['(alpha OR bravo) AND charlie', ['alpha charlie', 'bravo charlie', 'alpha bravo charlie']],
+    ['(alpha OR bravo) charlie', ['alpha charlie', 'bravo charlie', 'alpha bravo charlie']],
+    ['charlie (alpha OR bravo)', ['alpha charlie', 'bravo charlie', 'alpha bravo charlie']],
+    ['(alpha OR bravo) (charlie)', ['alpha charlie', 'bravo charlie', 'alpha bravo charlie']],
+    ['(alpha OR bravo) msg:charlie', ['alpha charlie', 'bravo charlie', 'alpha bravo charlie']],
     ['"alpha bravo"', ['alpha bravo', 'alpha bravo charlie']],
     ['"alpha bravo" OR charlie', ['alpha bravo', 'alpha bravo charlie', 'charlie', 'alpha charlie', 'bravo charlie']],
   ])('%s', (query, expected) => {
@@ -172,6 +176,11 @@ describe('matchesSearchQuery AND, OR and NOT like history search', () => {
     expect(matchesSearchQuery(makeLog('auth session opened by cron'), q2)).toBe(false);
     // The whole query appearing as text does not bypass NOT
     expect(matchesSearchQuery(makeLog('auth not cron'), q2)).toBe(false);
+
+    const q3 = compileSearchQuery('(error OR timeout) app:sshd');
+    expect(matchesSearchQuery(makeLog('read timeout', { app_name: 'sshd' }), q3)).toBe(true);
+    expect(matchesSearchQuery(makeLog('disk error', { app_name: 'sshd' }), q3)).toBe(true);
+    expect(matchesSearchQuery(makeLog('disk error', { app_name: 'nginx' }), q3)).toBe(false);
   });
 
   it('combines column filters with OR and NOT', () => {
@@ -181,6 +190,15 @@ describe('matchesSearchQuery AND, OR and NOT like history search', () => {
     expect(matchesSearchQuery(sshdOnPve, compileSearchQuery('app:nginx OR app:sshd'))).toBe(true);
     expect(matchesSearchQuery(sshdOnPve, compileSearchQuery('host:pve-node2 NOT app:sshd'))).toBe(false);
     expect(matchesSearchQuery(nginxOnNas, compileSearchQuery('msg:"worker started" NOT host:pve-node2'))).toBe(true);
+  });
+
+  it('matches a group beside a term with punctuation, and keeps text glued to a bracket as words, as history search does', () => {
+    const q = compileSearchQuery('(failed OR invalid) user=root');
+    expect(matchesSearchQuery(makeLog('invalid user=root'), q)).toBe(true);
+    expect(matchesSearchQuery(makeLog('failed user=admin'), q)).toBe(false);
+    // error(5) is pasted log text, not a group: no AND, so the query is not an expression
+    expect(compileSearchQuery('error(5)').expr).toBeNull();
+    expect(compileSearchQuery('error (5)').expr).not.toBeNull();
   });
 
   it('falls back to requiring every word when the operators are incomplete, as while typing', () => {

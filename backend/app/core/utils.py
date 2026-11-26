@@ -451,8 +451,13 @@ def _auto_prefix(fts_term: str, typed: str) -> str:
 
 
 def _needs_fts_quoting(value: str) -> bool:
-    """True when an unquoted FTS5 term would be a syntax error (dots and hyphens split tokens)."""
-    return "." in value or "-" in value
+    """
+    True when FTS5 cannot take value as a bare word: it holds a character other than a letter,
+    digit, '_' or a non-ASCII character (dots and hyphens in IPs and host names, '=', '/', '@').
+    FTS5's own '+' and a leading '^' (start of a column) stay as typed.
+    """
+    body = value[1:] if value.startswith("^") else value
+    return any(not (ch.isalnum() or ch == "_" or ch == "+" or ord(ch) > 127) for ch in body)
 
 
 def escape_fts_tokens(query_str: str) -> str:
@@ -490,6 +495,7 @@ def format_fts_query(query_str: str) -> str:
     - The shorthand prefixes app:, host:, source: and msg: (any case) map to app_name,
       source_alias, source_alias and message, matching the live stream filter.
     - Terms containing '.' or '-' (IP addresses, host names such as pve-node2) are quoted.
+    - A parenthesised group beside a term or another group gets an explicit AND, which FTS5 needs.
     """
     q = query_str.strip()
     if not q:
@@ -500,15 +506,20 @@ def format_fts_query(query_str: str) -> str:
         return escape_fts_tokens(q)
 
     formatted_tokens = []
-    for token in _FTS_TOKEN_PATTERN.findall(q):
-        token = token.strip()
+    spaced_before = []
+    last_end = 0
+    for match in _FTS_TOKEN_PATTERN.finditer(q):
+        token = match.group(0).strip()
         if not token:
             continue
         formatted = _format_fts_token(token)
         if formatted is None:
             return escape_fts_tokens(q)
         formatted_tokens.append(formatted)
+        spaced_before.append(q[last_end:match.start()].strip() == "" and match.start() > last_end)
+        last_end = match.end()
 
+    formatted_tokens = _with_group_ands(formatted_tokens, spaced_before)
     if not _is_valid_fts_sequence(formatted_tokens):
         return escape_fts_tokens(q)
     return " ".join(formatted_tokens)
@@ -574,6 +585,25 @@ def _format_fts_term(term: str, column: str = "") -> str:
     if _needs_fts_quoting(clean):
         return _auto_prefix(f'{column}"{clean}"', term)
     return _auto_prefix(f"{column}{clean}", term)
+
+
+def _with_group_ands(tokens: list[str], spaced_before: list[bool]) -> list[str]:
+    """
+    tokens with AND between a parenthesised group and a term or another group a space apart.
+    FTS5 takes words side by side as AND, but rejects "(a OR b) c" and "c (a OR b)" without it.
+    A bracket glued to a word, as in pasted log text such as error(5), gets no AND, so the
+    query falls back to quoted words as it always did.
+    """
+    out: list[str] = []
+    for token, spaced in zip(tokens, spaced_before):
+        if out and spaced:
+            prev = out[-1]
+            ends_operand = prev == ")" or (prev not in _FTS_OPERATORS and prev != "(")
+            starts_operand = token == "(" or (token not in _FTS_OPERATORS and token != ")")
+            if ends_operand and starts_operand and (prev == ")" or token == "("):
+                out.append("AND")
+        out.append(token)
+    return out
 
 
 def _is_valid_fts_sequence(tokens: list[str]) -> bool:

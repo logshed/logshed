@@ -1695,6 +1695,19 @@ class TestSearchBooleanOperators:
         ]
 
     @pytest.mark.asyncio
+    async def test_group_beside_a_term_with_punctuation(self, client: AsyncClient, auth_cookie: dict, tmp_path: Path):
+        # user=root must be quoted for FTS5; unquoted, the whole query fell back and found nothing
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        rows = self._entries()
+        for row, message in zip(rows, ["failed user=root", "invalid user=root", "failed user=admin", "ok user=root"]):
+            row["message"] = row["raw"] = message
+        _seed_logs(tmp_path / "logs.db", rows[:4])
+
+        res = await client.get("/api/logs", params={"query": "(failed OR invalid) user=root"})
+        assert res.status_code == 200
+        assert {log["message"] for log in res.json()["logs"]} == {"failed user=root", "invalid user=root"}
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "query, expected_messages",
         [
@@ -1714,6 +1727,12 @@ class TestSearchBooleanOperators:
             ("alpha NOT bravo OR charlie", {"alpha", "alpha charlie", "charlie", "bravo charlie", "alpha bravo charlie"}),
             ("alpha OR bravo NOT charlie", {"alpha", "alpha charlie", "alpha bravo", "alpha bravo charlie", "bravo"}),
             ("(alpha OR bravo) AND charlie", {"alpha charlie", "bravo charlie", "alpha bravo charlie"}),
+            # A group beside a word or another group needs FTS5's explicit AND, which LogShed adds
+            # (a beta tester's "(error OR timeout) host:pve-node2" returned nothing, 2026-11-26)
+            ("(alpha OR bravo) charlie", {"alpha charlie", "bravo charlie", "alpha bravo charlie"}),
+            ("charlie (alpha OR bravo)", {"alpha charlie", "bravo charlie", "alpha bravo charlie"}),
+            ("(alpha OR bravo) (charlie)", {"alpha charlie", "bravo charlie", "alpha bravo charlie"}),
+            ("(alpha OR bravo) msg:charlie", {"alpha charlie", "bravo charlie", "alpha bravo charlie"}),
             ('"alpha bravo"', {"alpha bravo", "alpha bravo charlie"}),
             ('"alpha bravo" OR charlie', {"alpha bravo", "alpha bravo charlie", "charlie", "alpha charlie", "bravo charlie"}),
         ],

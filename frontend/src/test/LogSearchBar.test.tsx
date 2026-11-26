@@ -439,7 +439,7 @@ describe('LogSearchBar search button, drawer and syntax help', () => {
     fireEvent.click(help);
     expect(help).toHaveAttribute('aria-expanded', 'true');
     const popover = screen.getByRole('dialog', { name: 'Search syntax' });
-    for (const example of ['"exact phrase"', 'error OR timeout', 'auth NOT cron', 'app:nginx', 'host:pve-node2', 'msg:"disk full"']) {
+    for (const example of ['"exact phrase"', 'error OR timeout', 'auth NOT cron', '(error OR timeout) app:sshd', 'app:nginx', 'host:pve-node2', 'msg:"disk full"']) {
       expect(within(popover).getByText(example)).toBeInTheDocument();
     }
     expect(within(popover).getByText(/time finds timeout/)).toBeInTheDocument();
