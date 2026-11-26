@@ -113,6 +113,29 @@ describe('RulePreviewPanel', () => {
     expect(screen.getByTestId('rule-preview-summary')).toBeTruthy();
   });
 
+  it('keeps the button focusable while it checks, so keyboard focus stays in the dialog, and runs one check at a time', async () => {
+    let finish: (value: RulePreviewResponse) => void = () => {};
+    const run = vi.fn().mockImplementation(() => new Promise<RulePreviewResponse>((resolve) => { finish = resolve; }));
+    render(<RulePreviewPanel request={{ p: 'a' }} run={run} verb="matched" note="n" />);
+    const button = screen.getByRole('button', { name: 'Check last 24h' });
+    button.focus();
+    fireEvent.click(button);
+
+    const busy = await screen.findByRole('button', { name: 'Checking...' });
+    // A disabled button loses focus to the page in a browser (found by a keyboard tester, 2026-11-26)
+    expect(busy).toBe(button);
+    expect((busy as HTMLButtonElement).disabled).toBe(false);
+    expect(busy.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    finish(result());
+    await screen.findByTestId('rule-preview-summary');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Check last 24h' }));
+    expect(screen.getByRole('button', { name: 'Check last 24h' }).getAttribute('aria-disabled')).toBeNull();
+  });
+
   it('shows the server message when another check is running, and a pattern error', async () => {
     const run = vi
       .fn()

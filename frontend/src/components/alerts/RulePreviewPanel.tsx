@@ -68,6 +68,7 @@ export function RulePreviewPanel<T>({ request, run, verb, note, scope, disabled 
   const todayKey = useMemo(() => getTodayKey(timeZone), [timeZone]);
 
   const handleCheck = async () => {
+    if (isChecking) return;
     setIsChecking(true);
     try {
       const result = await run(request);
@@ -89,7 +90,9 @@ export function RulePreviewPanel<T>({ request, run, verb, note, scope, disabled 
           size="sm"
           icon={<History className="w-3 h-3 text-accent-400" aria-hidden="true" />}
           onClick={handleCheck}
-          disabled={disabled || isChecking}
+          // Not disabled while checking: a disabled button drops keyboard focus out of the dialog
+          disabled={disabled}
+          aria-disabled={isChecking || undefined}
           aria-busy={isChecking}
         >
           {isChecking ? 'Checking...' : 'Check last 24h'}

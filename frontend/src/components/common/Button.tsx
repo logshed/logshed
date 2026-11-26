@@ -22,7 +22,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
 // No white-space here: a class added after the look cannot override one in it (Tailwind orders
 // utilities by stylesheet, not by class order), so each button chooses nowrap or wrapping itself.
 const BASE =
-  'inline-flex items-center justify-center gap-1.5 rounded-sm border font-medium transition cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center gap-1.5 rounded-sm border font-medium transition cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed';
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'border-transparent bg-accent-700 hover:bg-accent-600 text-on-fill shadow-xs',
