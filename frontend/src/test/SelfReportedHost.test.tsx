@@ -46,7 +46,7 @@ describe('Self-reported host names', () => {
   it('marks a self-reported name in the host column, with the address on hover', () => {
     row(reportedLog);
     const cell = screen.getByText('printer-hp').closest('[title]');
-    expect(cell).toHaveAttribute('title', 'printer-hp: the name 172.17.0.4 sends itself (no alias set)');
+    expect(cell).toHaveAttribute('title', 'printer-hp: the name 172.17.0.4 reports for itself (no alias set)');
     expect(screen.getByText('(self-reported)')).toHaveClass('sr-only');
   });
 
@@ -102,7 +102,7 @@ describe('Self-reported host names', () => {
     const [plain, reported] = screen.getAllByTestId('quick-filter-host');
     expect(plain).not.toHaveAttribute('title');
     expect(plain).not.toHaveTextContent('(self-reported)');
-    expect(reported).toHaveAttribute('title', 'printer-hp: the name 172.17.0.4, 172.17.0.5 send themselves (no alias set)');
+    expect(reported).toHaveAttribute('title', 'printer-hp: the name 172.17.0.4, 172.17.0.5 report for themselves (no alias set)');
     expect(reported).toHaveTextContent('(self-reported)');
   });
 
@@ -112,7 +112,7 @@ describe('Self-reported host names', () => {
     render(
       <LogDetailModal log={reportedLog} isOpen={true} onClose={onClose} onExplainWithAi={vi.fn()} onAddAlias={vi.fn()} onMakeAlias={onMakeAlias} />
     );
-    expect(screen.getByTestId('reported-host-note')).toHaveTextContent('printer-hp is the name this device sends itself.');
+    expect(screen.getByTestId('reported-host-note')).toHaveTextContent('printer-hp is the name this device reports for itself.');
     // No alias yet, so the other action adds one rather than modifying it
     expect(screen.getByText('Add Host Alias')).toBeInTheDocument();
 

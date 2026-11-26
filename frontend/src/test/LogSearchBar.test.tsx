@@ -212,6 +212,23 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     );
 
     expect(screen.getByText('42 logs')).toBeInTheDocument();
+    expect(screen.getByTestId('search-bar-total-count')).toHaveAttribute('title', '42 logs matched');
+  });
+
+  it('says one log, not one logs, in the count and its hover text', async () => {
+    await renderSettled(
+      <LogSearchBar
+        filters={{ query: 'error' }}
+        onFilterChange={vi.fn()}
+        onSearch={vi.fn()}
+        onReset={vi.fn()}
+        totalCount={1}
+        totalCapped={false}
+      />
+    );
+
+    expect(screen.getByTestId('search-bar-total-count')).toHaveTextContent('1 log');
+    expect(screen.getByTestId('search-bar-total-count')).toHaveAttribute('title', '1 log matched');
   });
 });
 

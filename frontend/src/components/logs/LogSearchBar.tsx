@@ -375,7 +375,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <span
               className="text-fg-muted font-mono text-[11px] shrink-0"
               data-testid="search-bar-total-count"
-              title={totalCapped ? 'Results capped at 1,000+ records' : `${totalCount.toLocaleString()} logs matched`}
+              title={totalCapped ? 'Results capped at 1,000+ records' : `${totalCount.toLocaleString()} ${totalCount === 1 ? 'log' : 'logs'} matched`}
             >
               {totalCapped ? '1,000+ logs' : `${totalCount.toLocaleString()} log${totalCount === 1 ? '' : 's'}`}
             </span>

@@ -16,13 +16,26 @@ function levelName(n: number): string {
   return SEVERITIES.find((s) => s.value === n)?.name ?? getSeverityInfo(n).label;
 }
 
-/** Console filters and alert rules keep severity <= n. Example: "Warning (4) and more severe". */
+const MOST_SEVERE = 0;
+const LEAST_SEVERE = 7;
+
+/**
+ * Console filters and alert rules keep severity <= n. Example: "Warning (4) and more severe";
+ * Emergency (0) is that level only, and Debug (7) is every level.
+ */
 export function moreSevereLabel(n: number): string {
+  if (n === MOST_SEVERE) return `${levelName(n)} (${n}) only`;
+  if (n === LEAST_SEVERE) return `${levelName(n)} (${n}): every level`;
   return `${levelName(n)} (${n}) and more severe`;
 }
 
-/** Drop rules drop severity >= n. Example: "Warning (4) and less severe". */
+/**
+ * Drop rules drop severity >= n. Example: "Warning (4) and less severe"; Debug (7) is that level
+ * only, and Emergency (0) is every level.
+ */
 export function lessSevereLabel(n: number): string {
+  if (n === LEAST_SEVERE) return `${levelName(n)} (${n}) only`;
+  if (n === MOST_SEVERE) return `${levelName(n)} (${n}): every level`;
   return `${levelName(n)} (${n}) and less severe`;
 }
 

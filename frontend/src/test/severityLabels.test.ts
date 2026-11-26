@@ -4,12 +4,15 @@ import { moreSevereLabel, lessSevereLabel, compactMoreSevereLabel } from '../uti
 describe('severityLabels', () => {
   it('builds the long "more severe" label', () => {
     expect(moreSevereLabel(4)).toBe('Warning (4) and more severe');
-    expect(moreSevereLabel(0)).toBe('Emergency (0) and more severe');
+    // Nothing is more severe than Emergency, and Debug and more severe is every level (beta testers, 2026-11-26)
+    expect(moreSevereLabel(0)).toBe('Emergency (0) only');
+    expect(moreSevereLabel(7)).toBe('Debug (7): every level');
   });
 
   it('builds the long "less severe" label', () => {
     expect(lessSevereLabel(4)).toBe('Warning (4) and less severe');
-    expect(lessSevereLabel(7)).toBe('Debug (7) and less severe');
+    expect(lessSevereLabel(7)).toBe('Debug (7) only');
+    expect(lessSevereLabel(0)).toBe('Emergency (0): every level');
   });
 
   it('builds the compact label with short names', () => {

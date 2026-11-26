@@ -41,7 +41,7 @@ describe('Self-reported hosts on Settings -> Sources', () => {
     const badge = within(row).getByText('Self-reported +1');
     expect(badge).toHaveAttribute(
       'title',
-      'The name 172.17.0.4 sends itself (no alias set). It has also sent: printer-hp'
+      'The name 172.17.0.4 reports for itself (no alias set). It has also sent: printer-hp'
     );
     expect(within(row).getByText('1 min ago')).toBeInTheDocument();
     expect(screen.getByText(/Active Host Mappings \(1, 1 self-reported\)/)).toBeInTheDocument();

@@ -398,7 +398,7 @@ describe('AlertRuleModal Component', () => {
         onSuccess={onSuccess}
       />
     );
-    const texts = ['Emergency (0) and more severe', 'Alert (1) and more severe', 'Critical (2) and more severe', 'Error (3) and more severe', 'Warning (4) and more severe', 'Notice (5) and more severe', 'Info (6) and more severe', 'Debug (7) and more severe'];
+    const texts = ['Emergency (0) only', 'Alert (1) and more severe', 'Critical (2) and more severe', 'Error (3) and more severe', 'Warning (4) and more severe', 'Notice (5) and more severe', 'Info (6) and more severe', 'Debug (7): every level'];
     expect(optionLabels(screen.getByLabelText('Severity Filter (Optional)'))).toEqual(['Any Severity', ...texts]);
   });
 });

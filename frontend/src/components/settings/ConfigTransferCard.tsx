@@ -201,7 +201,7 @@ export const ConfigTransferCard: React.FC<ConfigTransferCardProps> = ({ serverTi
       <CardHeader
         icon={<FileJson />}
         title="Configuration Export & Import"
-        description="Copy every setting and list (sources, notification targets, alert and drop rules, saved views, maintenance schedules) to one file, or bring one in from another LogShed server. Logs and history are never included."
+        description="Copy every saved setting and every list (sources, notification targets, alert and drop rules, saved views, maintenance schedules) to one file, or bring one in from another LogShed server. Logs and history are never included."
       />
 
       <FeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} />

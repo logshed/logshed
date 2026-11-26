@@ -120,7 +120,7 @@ Connecting your AI assistant takes less than a minute:
 
    Connecting needs only `logs:read`. Each tool then checks its own scope (see [Security & Access Guardrails](#security--access-guardrails)), so a tool the token is not allowed to use returns a tool error instead of running.
 4. Set an expiration period (or select Never).
-5. Click **Generate Token** and copy the raw secret (`ls_live_...`).
+5. Click **Create Token** and copy the raw secret (`ls_live_...`).
 
 The name and scopes can be changed later with **Edit** in the token list, without creating a new token. The token string stays the same, so the client configuration needs no update, and the change applies to the assistant's next request. Rename the token too if its name no longer fits (for example a "Claude Read-Only" token that gains `maintenance:write`).
 

@@ -152,7 +152,7 @@ describe('CreateDropRuleModal severity range and whole-line hint', () => {
     render(<CreateDropRuleModal isOpen={true} onClose={vi.fn()} onSuccess={vi.fn()} ruleToEdit={null} />);
     expect(optionLabels(screen.getByLabelText('Severity Range (Optional)'))).toEqual([
       'Any severity',
-      'Debug (7) and less severe',
+      'Debug (7) only',
       'Info (6) and less severe',
       'Notice (5) and less severe',
       'Warning (4) and less severe',

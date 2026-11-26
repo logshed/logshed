@@ -58,7 +58,7 @@ export const ReportedHostNote: React.FC<ReportedHostNoteProps> = ({ log, hostAli
       <div className="flex-1 min-w-0 text-fg-soft leading-relaxed">
         {log.host_self_reported ? (
           <p>
-            <span className="font-mono text-fg">{reported}</span> is the name this device sends itself.{' '}
+            <span className="font-mono text-fg">{reported}</span> is the name this device reports for itself.{' '}
             {log.source_ip} has no alias in LogShed, so the name is shown as sent and marked as self-reported.
           </p>
         ) : (

@@ -86,7 +86,7 @@ A multi-select dropdown listing known applications and daemons discovered across
 With both a host filter and an app filter, a log must match both.
 
 #### 6. Severity Filter (Optional)
-Restricts rule evaluation to logs at the chosen syslog severity level or more severe (syslog levels 0 to 7, where a lower number is more severe). The dropdown shows each level as, for example, `Warning (4) and more severe`:
+Restricts rule evaluation to logs at the chosen syslog severity level or more severe (syslog levels 0 to 7, where a lower number is more severe). The dropdown shows each level as, for example, `Warning (4) and more severe`, with `Emergency (0) only` and `Debug (7): every level` at the ends:
 - `0 - Emergency`: System unusable
 - `1 - Alert`: Action must be taken immediately
 - `2 - Critical`: Critical conditions
@@ -274,7 +274,7 @@ Links and bookmarks with the old name in them are not changed.
 
 The **Severity Range** allows conditional filtering based on standard syslog severity levels (0 = Emergency to 7 = Debug).
 
-LogShed drops matching logs only if their severity is the selected level or less severe (a higher number is less severe). The dropdown shows each level as, for example, `Info (6) and less severe`:
+LogShed drops matching logs only if their severity is the selected level or less severe (a higher number is less severe). The dropdown shows each level as, for example, `Info (6) and less severe`, and `Debug (7) only` for debug logs alone:
 - If Severity Range is set to `Info (6) and less severe`, LogShed will drop logs matching the criteria if they are `6 - Info` or `7 - Debug`.
 - If an application generates an unexpected `3 - Error` or `4 - Warning` matching the same pattern, LogShed **preserves** the log and writes it to SQLite, ensuring critical failures are never missed.
 - If Severity Range is left unset, all logs matching the pattern are dropped regardless of severity.

@@ -57,6 +57,6 @@ export const HostName: React.FC<{ name: string; selfReported?: boolean; trimText
 export function selfReportedTitle(name: string, addresses: string[]): string {
   const list = addresses.join(', ');
   return addresses.length > 1
-    ? `${name}: the name ${list} send themselves (no alias set)`
-    : `${name}: the name ${list} sends itself (no alias set)`;
+    ? `${name}: the name ${list} report for themselves (no alias set)`
+    : `${name}: the name ${list} reports for itself (no alias set)`;
 }

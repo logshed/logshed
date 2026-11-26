@@ -82,8 +82,8 @@ const SelfReportedBadge: React.FC<{ host: SelfReportedHost }> = ({ host }) => (
   <Badge
     title={
       host.names.length > 1
-        ? `The name ${host.ip} sends itself (no alias set). It has also sent: ${host.names.slice(1).join(', ')}`
-        : `The name ${host.ip} sends itself (no alias set)`
+        ? `The name ${host.ip} reports for itself (no alias set). It has also sent: ${host.names.slice(1).join(', ')}`
+        : `The name ${host.ip} reports for itself (no alias set)`
     }
   >
     Self-reported{host.names.length > 1 ? ` +${host.names.length - 1}` : ''}
@@ -212,7 +212,7 @@ export const HostAliasManager: React.FC = () => {
           className="p-3.5 sm:p-5 border-b border-line"
           icon={<Server />}
           title="Syslog Host Aliases"
-          description="Map incoming syslog source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall). A host without an alias appears in the Console by the name it sends itself, listed below as self-reported, or by its IP address."
+          description="Map incoming syslog source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall). A host without an alias appears in the Console by the name it reports for itself, listed below as self-reported, or by its IP address."
           actions={
             <Button variant="primary" onClick={openAddModal} icon={<Plus className="w-3.5 h-3.5" />}>
               Add Host Alias

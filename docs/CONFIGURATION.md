@@ -253,7 +253,7 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 | **Ingestion Drop Rules** | **Rules & History > Drop Rules** | Filter repetitive log noise in memory before database insertion and indexing. |
 | **Maintenance Windows** | **Rules & History > Maintenance** | Set on-demand or recurring windows that silence notifications, or also drop error logs, from every source or one host or app, during planned downtime (see [Maintenance Windows](RULES_GUIDE.md#maintenance-windows)). |
 | **API Tokens & MCP Access** | **Settings > API & MCP Access** | Generate scoped Bearer tokens, turn the Model Context Protocol (MCP) server on or off (with **Save Changes**), and inspect client configuration guides (Claude Desktop, Cursor, Antigravity). |
-| **Configuration Export & Import** | **Settings > Advanced** | Save every setting and list to one JSON file, or bring one in from another LogShed server (see [Moving the Configuration to Another Server](#moving-the-configuration-to-another-server)). |
+| **Configuration Export & Import** | **Settings > Advanced** | Put every saved setting and every list in one JSON file, or bring one in from another LogShed server (see [Moving the Configuration to Another Server](#moving-the-configuration-to-another-server)). |
 
 ---
 
@@ -378,7 +378,7 @@ LogShed 1.4.0 and later make that backup for you. With an older version, or with
 
 ### Moving the Configuration to Another Server
 
-**Settings > Advanced > Configuration Export & Import** saves every setting and list to one JSON file: settings, notification targets, Docker hosts, host aliases, alert rules, drop rules, saved views and maintenance schedules. Logs, alert history and AI analyses are never in it; to move those too, copy `/data` with its `.secret_key` instead.
+**Settings > Advanced > Configuration Export & Import** puts every saved setting and every list in one JSON file: settings, notification targets, Docker hosts, host aliases, alert rules, drop rules, saved views and maintenance schedules. Settings left at their defaults stay out, so the other server keeps its own defaults (and its environment variables) for them. Logs, alert history and AI analyses are never in it; to move those too, copy `/data` with its `.secret_key` instead.
 
 - **Secrets stay out by default.** AI keys, notification URLs and Docker TLS client keys are stored encrypted with this server's `.secret_key`, which the file never holds. Tick **Include secrets** to add them and your API tokens, encrypted with a file password you choose (at least 8 characters); LogShed also asks for your admin password, so a signed-in browser alone cannot take them. LogShed keeps no copy of the password: without it the file's secrets cannot be read. Moved API tokens keep working on the new server, so Home Assistant and other clients need no new token.
 - **Import** shows each section of the file and what it would do: how many items it adds, how many it replaces because one with the same name is already there but differs (a host alias matches by address, the local Docker host matches the local Docker host), and how many are already the same. Only the ticked sections are imported, and nothing already on the server is removed. Each item is checked as if you had added it by hand; one that fails is listed and the rest are imported.

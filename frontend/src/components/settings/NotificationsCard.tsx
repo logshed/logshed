@@ -287,7 +287,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             </Badge>
           </>
         }
-        description="Dispatch real-time alerts across 80+ platforms (Discord, Gotify, Telegram, Ntfy, Pushover, Home Assistant, Slack, Email) using standard webhook URLs. Sensitive tokens are encrypted at rest."
+        description="Dispatch real-time alerts across 100+ services (Discord, Gotify, Telegram, Ntfy, Pushover, Home Assistant, Slack, Email) using standard webhook URLs. Sensitive tokens are encrypted at rest."
         actions={
           <Button
             size="sm"
