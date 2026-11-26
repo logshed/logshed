@@ -28,7 +28,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.core.redactor import redact
-from app.core.utils import get_server_tzinfo
+from app.core.utils import format_severity_label, get_server_tzinfo
 from app.services import log_store
 from app.services.log_query import (
     SEARCH_TIME_LIMIT_SECONDS,
@@ -47,7 +47,8 @@ EXPORT_PAGE_SIZE = 1000
 
 ExportFormat = Literal["csv", "ndjson"]
 
-# Fields of each log, in this order in both formats (the API's log fields)
+# Fields of each log, in this order in both formats: the API's log fields, with the severity's
+# name beside its number (as MCP gives it)
 EXPORT_FIELDS = (
     "id",
     "timestamp",
@@ -56,6 +57,7 @@ EXPORT_FIELDS = (
     "source_ip",
     "app_name",
     "severity",
+    "severity_label",
     "facility",
     "source_kind",
     "reported_host",
@@ -74,7 +76,12 @@ CAPPED_HEADER = "X-LogShed-Export-Capped"
 
 
 def csv_cell(value: object) -> object:
-    """A text value made safe for a spreadsheet: one that would start a formula gets a leading '."""
+    """
+    A value as a CSV cell: true or false for a boolean (as in the NDJSON file, not Python's
+    True), and text made safe for a spreadsheet: one that would start a formula gets a leading '.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, str) and value.startswith(_FORMULA_STARTS):
         return "'" + value
     return value
@@ -83,6 +90,7 @@ def csv_cell(value: object) -> object:
 def export_record(row, mask_secrets: bool) -> dict:
     """One log as exported: the API's fields, with secrets in its message and raw text masked when asked."""
     entry = row_to_log_entry(row).model_dump()
+    entry["severity_label"] = format_severity_label(entry.get("severity"))
     record = {field: entry.get(field) for field in EXPORT_FIELDS}
     if mask_secrets:
         for field in ("message", "raw"):

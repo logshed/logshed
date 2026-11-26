@@ -104,6 +104,10 @@ class TestConsoleExport:
         assert [r["message"] for r in rows] == ["line 2", "line 1"]
         assert rows[0]["app_name"] == "caddy"
         assert rows[0]["severity"] == "3"
+        # The name beside the number, as MCP gives it, and lower-case booleans (beta testers, 2026-11-26)
+        assert rows[0]["severity_label"] == "error"
+        assert rows[1]["severity_label"] == "info"
+        assert rows[0]["host_self_reported"] == "false"
         assert rows[0]["raw"] == "<14>line 2"
         assert rows[0]["timestamp"].startswith("2026-11-15T10:00:02")
 
@@ -124,6 +128,8 @@ class TestConsoleExport:
         assert list(record) == list(log_export.EXPORT_FIELDS)
         assert record["message"] == "=1+1 password=hunter2 café"
         assert record["severity"] == 6
+        assert record["severity_label"] == "info"
+        assert record["host_self_reported"] is False
 
     @pytest.mark.asyncio
     async def test_mask_secrets_runs_the_redactor(self, client, session_headers, tmp_path):
@@ -306,8 +312,12 @@ class TestApiV1Export:
         assert res.status_code == 200
         assert res.headers["content-type"] == "application/x-ndjson"
         assert [r["message"] for r in read_ndjson(res.text)] == ["line 1"]
+        assert read_ndjson(res.text)[0]["severity_label"] == "error"
         res = await client.get("/api/v1/logs/export", params={"format": "csv"}, headers=headers)
-        assert len(read_csv(res.text)) == 2
+        rows = read_csv(res.text)
+        assert len(rows) == 2
+        assert [r["severity_label"] for r in rows] == ["info", "error"]
+        assert rows[0]["host_self_reported"] == "false"
 
     @pytest.mark.asyncio
     async def test_always_masks_secrets_like_every_api_response(self, client, token_headers, tmp_path):

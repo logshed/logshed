@@ -25,7 +25,7 @@ Read these before updating from 1.3.x. The first start backs up the database wit
 
 ### Added
 - **Log volume chart**: The Console can chart the logs the search selects over time, by severity. Click a bar to zoom in, and Zoom out or the browser's Back button to return.
-- **Download logs**: Save the current search or the ticked rows as CSV or NDJSON (up to 100,000 logs), optionally with secrets masked. Scripts can use `GET /api/v1/logs/export`, which always masks them.
+- **Download logs**: Save the current search or the ticked rows as CSV or NDJSON (up to 100,000 logs, each severity also by name), optionally with secrets masked. Scripts can use `GET /api/v1/logs/export`, which always masks them.
 - **JSON logs as a tree** in the log drawer, with a copy button on each value.
 - **Resizable Console columns**: Drag the edge of the Timestamp, Host or App heading.
 - **Last seen per source**: Settings > Sources shows when each host alias and Docker host last sent a log, and lists devices without an alias by the name they report, with a Make it the alias button.
